@@ -1,8 +1,25 @@
+# Maven and Java build output
 target/
+*.class
+
+# Editor and operating system files
 .idea/
 .vscode/
 *.iml
 .DS_Store
-.env
-*.log
 
+# Local environment and provider credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+*service-account*.json
+
+# Local logs and runtime files
+*.log
+logs/
+*.pid
