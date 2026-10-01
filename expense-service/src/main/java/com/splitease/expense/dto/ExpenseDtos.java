@@ -27,12 +27,35 @@ public final class ExpenseDtos {
                          @NotNull @DecimalMin("0.01") BigDecimal amount,
                          @Pattern(regexp = "[A-Za-z]{3}") String currency,
                          @NotNull LocalDate expenseDate, @NotNull SplitType splitType,
-                         @NotEmpty List<@Valid Share> shares) {
+                         @NotEmpty List<@Valid Share> shares,
+                         @Size(max = 80) String category,
+                         @Size(max = 2000) String notes,
+                         @Valid Receipt receipt) {
+    }
+
+    public record Update(@NotNull UUID paidBy,
+                         @NotBlank @Size(max = 160) String description,
+                         @NotNull @DecimalMin("0.01") BigDecimal amount,
+                         @Pattern(regexp = "[A-Za-z]{3}") String currency,
+                         @NotNull LocalDate expenseDate, @NotNull SplitType splitType,
+                         @NotEmpty List<@Valid Share> shares,
+                         @Size(max = 80) String category,
+                         @Size(max = 2000) String notes,
+                         @Valid Receipt receipt) {
+    }
+
+    public record Receipt(@NotBlank @Size(max = 255) String name,
+                          @NotBlank @Size(max = 120) String contentType,
+                          @NotBlank @Size(max = 500) String storageKey) {
     }
 
     public record View(UUID id, UUID groupId, UUID paidBy, String description, BigDecimal amount,
                        String currency, LocalDate expenseDate, SplitType splitType,
-                       List<Share> shares, Instant createdAt) {
+                       List<Share> shares, Instant createdAt, Instant updatedAt,
+                       String category, String notes, Receipt receipt, long revision) {
+    }
+
+    public record AuditView(UUID id, UUID actorId, String action, long revision,
+                            String snapshot, Instant occurredAt) {
     }
 }
-

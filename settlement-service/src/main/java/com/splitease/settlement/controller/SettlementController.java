@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.UUID;
 
 import com.splitease.settlement.dto.SettlementDtos;
+import com.splitease.common.api.PageResponse;
 import com.splitease.settlement.service.BalanceQueryService;
 import com.splitease.settlement.service.BalanceQueryService.BalanceView;
 import com.splitease.settlement.service.SettlementService;
@@ -40,10 +41,12 @@ public class SettlementController {
     }
 
     @GetMapping("/group/{groupId}")
-    public List<SettlementDtos.View> byGroup(
+    public PageResponse<SettlementDtos.View> byGroup(
             @RequestHeader("X-User-Id") UUID userId,
-            @PathVariable UUID groupId) {
-        return settlementService.byGroup(userId, groupId);
+            @PathVariable UUID groupId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return settlementService.byGroup(userId, groupId, page, size);
     }
 
     @GetMapping("/group/{groupId}/balances")

@@ -1,9 +1,9 @@
 package com.splitease.group.controller;
 
-import java.util.List;
 import java.util.UUID;
 
 import com.splitease.group.dto.GroupDtos;
+import com.splitease.common.api.PageResponse;
 import com.splitease.group.service.GroupService;
 import com.splitease.group.service.GroupInvitationService;
 import jakarta.validation.Valid;
@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -37,8 +38,11 @@ public class GroupController {
     }
 
     @GetMapping
-    public List<GroupDtos.View> list(@RequestHeader("X-User-Id") UUID userId) {
-        return groupService.list(userId);
+    public PageResponse<GroupDtos.View> list(
+            @RequestHeader("X-User-Id") UUID userId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return groupService.list(userId, page, size);
     }
 
     @PostMapping("/{groupId}/invitations")
@@ -51,15 +55,20 @@ public class GroupController {
     }
 
     @GetMapping("/{groupId}/invitations")
-    public List<GroupDtos.InvitationView> groupInvitations(
+    public PageResponse<GroupDtos.InvitationView> groupInvitations(
             @RequestHeader("X-User-Id") UUID userId,
-            @PathVariable UUID groupId) {
-        return invitations.forGroup(userId, groupId);
+            @PathVariable UUID groupId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return invitations.forGroup(userId, groupId, page, size);
     }
 
     @GetMapping("/invitations/me")
-    public List<GroupDtos.InvitationView> myInvitations(@RequestHeader("X-User-Id") UUID userId) {
-        return invitations.inbox(userId);
+    public PageResponse<GroupDtos.InvitationView> myInvitations(
+            @RequestHeader("X-User-Id") UUID userId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return invitations.inbox(userId, page, size);
     }
 
     @PostMapping("/invitations/{invitationId}/accept")

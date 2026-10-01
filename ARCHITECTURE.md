@@ -14,6 +14,8 @@ The gateway validates access tokens and replaces caller-supplied identity header
 
 The groups service owns membership data and exposes a private membership snapshot contract protected by an internal service key. Expense creation verifies the payer and every participant, settlement creation verifies both parties, and group-scoped reads verify the caller. The expense and settlement services use this contract instead of reading the groups database.
 
+Expense edits and soft deletions publish transactional outbox events with the new expense revision. The settlement service stores each projected expense snapshot and applies the difference to group balances. Older or duplicate events cannot overwrite a newer revision.
+
 ## Ads and paid entitlement
 
 The free entitlement returns `adsEnabled: true`. An active plan that removes ads returns `adsEnabled: false` until its server-side expiry. Plan identity, amount, currency, duration, and feature flags live in the subscription database so clients do not hard-code commercial terms.

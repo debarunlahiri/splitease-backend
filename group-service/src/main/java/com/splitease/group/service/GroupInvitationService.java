@@ -2,11 +2,12 @@ package com.splitease.group.service;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
 import java.util.UUID;
 
 import com.splitease.common.exception.ConflictException;
 import com.splitease.common.exception.NotFoundException;
+import com.splitease.common.api.PageLimits;
+import com.splitease.common.api.PageResponse;
 import com.splitease.group.domain.ExpenseGroup;
 import com.splitease.group.domain.GroupInvitation;
 import com.splitease.group.dto.GroupDtos;
@@ -16,6 +17,7 @@ import jakarta.persistence.EntityManager;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
+import org.springframework.data.domain.Sort;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -57,24 +59,23 @@ public class GroupInvitationService {
     }
 
     @Transactional
-    public List<GroupDtos.InvitationView> inbox(UUID userId) {
-        return invitations.findByInviteeUserIdOrderByCreatedAtDesc(userId).stream()
+    public PageResponse<GroupDtos.InvitationView> inbox(UUID userId, int page, int size) {
+        return PageResponse.from(invitations.findByInviteeUserId(userId, pageRequest(page, size))
                 .map(invitation -> {
                     invitation.expireIfNeeded(Instant.now());
                     return view(invitation);
-                })
-                .toList();
+                }));
     }
 
     @Transactional
-    public List<GroupDtos.InvitationView> forGroup(UUID ownerId, UUID groupId) {
+    public PageResponse<GroupDtos.InvitationView> forGroup(
+            UUID ownerId, UUID groupId, int page, int size) {
         requireOwner(requiredGroup(groupId), ownerId);
-        return invitations.findByGroupIdOrderByCreatedAtDesc(groupId).stream()
+        return PageResponse.from(invitations.findByGroupId(groupId, pageRequest(page, size))
                 .map(invitation -> {
                     invitation.expireIfNeeded(Instant.now());
                     return view(invitation);
-                })
-                .toList();
+                }));
     }
 
     @Transactional(noRollbackFor = ConflictException.class)
@@ -126,6 +127,11 @@ public class GroupInvitationService {
         entityManager.createNativeQuery("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))")
                 .setParameter("key", "group-invitations:" + groupId)
                 .getSingleResult();
+    }
+
+    private org.springframework.data.domain.PageRequest pageRequest(int page, int size) {
+        return PageLimits.request(page, size, Sort.by(Sort.Order.desc("createdAt"),
+                Sort.Order.desc("id")));
     }
 
     private void requireOwner(ExpenseGroup group, UUID userId) {

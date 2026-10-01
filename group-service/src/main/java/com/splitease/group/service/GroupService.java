@@ -1,14 +1,16 @@
 package com.splitease.group.service;
 
-import java.util.List;
 import java.util.UUID;
 
 import com.splitease.common.api.GroupMembershipSnapshot;
+import com.splitease.common.api.PageLimits;
+import com.splitease.common.api.PageResponse;
 import com.splitease.common.exception.NotFoundException;
 import com.splitease.group.domain.ExpenseGroup;
 import com.splitease.group.dto.GroupDtos;
 import com.splitease.group.repository.ExpenseGroupRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.data.domain.Sort;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -25,8 +27,10 @@ public class GroupService {
     }
 
     @Transactional(readOnly = true)
-    public List<GroupDtos.View> list(UUID userId) {
-        return groups.findDistinctByMembersUserIdOrderByCreatedAtDesc(userId).stream().map(this::view).toList();
+    public PageResponse<GroupDtos.View> list(UUID userId, int page, int size) {
+        return PageResponse.from(groups.findDistinctByMembersUserId(userId,
+                PageLimits.request(page, size, Sort.by(Sort.Order.desc("createdAt"),
+                        Sort.Order.desc("id")))).map(this::view));
     }
 
     @Transactional(readOnly = true)

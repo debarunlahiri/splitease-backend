@@ -5,10 +5,13 @@ import java.util.List;
 import java.util.UUID;
 
 import com.splitease.common.event.SettlementRecordedEvent;
+import com.splitease.common.api.PageLimits;
+import com.splitease.common.api.PageResponse;
 import com.splitease.settlement.domain.Settlement;
 import com.splitease.settlement.dto.SettlementDtos;
 import com.splitease.settlement.repository.SettlementRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.data.domain.Sort;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -42,9 +45,12 @@ public class SettlementService {
     }
 
     @Transactional(readOnly = true)
-    public List<SettlementDtos.View> byGroup(UUID currentUserId, UUID groupId) {
+    public PageResponse<SettlementDtos.View> byGroup(
+            UUID currentUserId, UUID groupId, int page, int size) {
         groupMembership.requireMember(groupId, currentUserId);
-        return settlements.findByGroupIdOrderByCreatedAtDesc(groupId).stream().map(this::view).toList();
+        return PageResponse.from(settlements.findByGroupId(groupId,
+                PageLimits.request(page, size, Sort.by(Sort.Order.desc("createdAt"),
+                        Sort.Order.desc("id")))).map(this::view));
     }
 
     private SettlementDtos.View view(Settlement value) {

@@ -23,9 +23,9 @@ When work begins, update the task to `IN_PROGRESS`. When its source changes and 
 | TASK-004 | P1 | DONE | Build aggregate group balances from expense and settlement events and expose simplified payment suggestions. |
 | TASK-005 | P1 | DONE | Add refresh-token rotation, logout/revocation, email verification, and login throttling. |
 | TASK-006 | P1 | DONE | Add invitation lifecycle: create, accept, decline, expire, and revoke. |
-| TASK-007 | P1 | PLANNED | Add expense editing, deletion, categories, notes, receipt metadata, and audit history. |
-| TASK-008 | P1 | PLANNED | Add notification preferences, unread counts, pagination, and push-delivery provider ports. |
-| TASK-009 | P2 | PLANNED | Add OpenAPI documentation and consistent pagination contracts. |
+| TASK-007 | P1 | DONE | Add expense editing, deletion, categories, notes, receipt metadata, and audit history. |
+| TASK-008 | P1 | DONE | Add notification preferences, unread counts, pagination, and push-delivery provider ports. |
+| TASK-009 | P2 | IN_PROGRESS | Add OpenAPI documentation and consistent pagination contracts. |
 | TASK-010 | P2 | PLANNED | Add unit, repository, contract, and Testcontainers test suites. |
 | TASK-011 | P2 | PLANNED | Add container images, production Compose wiring, health dependencies, and observability dashboards. |
 | TASK-012 | P2 | PLANNED | Add CI checks for formatting, compilation, tests, migrations, dependency review, and container scanning. |
@@ -56,6 +56,11 @@ When work begins, update the task to `IN_PROGRESS`. When its source changes and 
 - 2026-10-01: Completed `TASK-005` source work; registration now requires email verification, login issues rotating refresh tokens, replay revokes the token family, logout revokes the family, and persistent login throttles apply across service instances. Existing users are preserved as verified by the migration. Added a local logging sender and a production email-sender port. XML, YAML, package-path, brace, and whitespace checks passed; compilation, migration execution, email delivery, and runtime security behavior remain unverified.
 - 2026-10-01: Started `TASK-006` invitation lifecycle work.
 - 2026-10-01: Completed `TASK-006` source work; replaced direct member addition with owner-created invitations, invitee acceptance or decline, owner revocation, and lazy expiry. Added a migration, uniqueness guard, and cross-instance locking for invitation changes. Maven XML, YAML, package-path, brace, and whitespace checks passed; compilation, migration execution, and runtime behavior remain unverified.
+- 2026-10-01: Started `TASK-007` expense lifecycle and balance correction work.
+- 2026-10-01: Completed `TASK-007` source implementation; payer-authorized edits and soft deletion now record audit snapshots and publish revisioned correction events. Settlement balances apply the latest expense snapshot, ignoring older events. Added category, notes, receipt metadata, and schema migrations. Source structure checks passed; compilation and runtime behavior remain unverified. Deployments with existing projected expenses require a one-time balance/projection reconciliation before enabling edits.
+- 2026-10-01: Started `TASK-008` notification preferences, pagination, and push delivery work.
+- 2026-10-01: Completed `TASK-008` source work; added per-user inbox and push preferences, visible unread counts, bounded pagination, transactional push queueing, provider port, and retrying dispatcher. Push dispatch remains disabled until a provider adapter is supplied. Maven XML, YAML, migration-version, package-path, brace, and whitespace checks passed; compilation and runtime behavior remain unverified.
+- 2026-10-01: Started `TASK-009` OpenAPI and pagination contract work.
 
 ## Verification boundary
 

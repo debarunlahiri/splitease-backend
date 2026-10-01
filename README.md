@@ -35,6 +35,9 @@ Each business service owns a separate PostgreSQL database. Kafka carries domain 
 - `POST /api/v1/groups/invitations/{invitationId}/revoke`
 - `POST /api/v1/expenses`
 - `GET /api/v1/expenses/group/{groupId}`
+- `PUT /api/v1/expenses/{expenseId}`
+- `DELETE /api/v1/expenses/{expenseId}`
+- `GET /api/v1/expenses/{expenseId}/history`
 - `GET /api/v1/settlements/group/{groupId}`
 - `GET /api/v1/settlements/group/{groupId}/balances?currency=INR`
 - `GET /api/v1/settlements/group/{groupId}/suggestions?currency=INR`
@@ -44,6 +47,11 @@ Each business service owns a separate PostgreSQL database. Kafka carries domain 
 - `POST /api/v1/subscriptions/me/purchases/verify`
 - `POST /api/v1/subscriptions/webhooks/apple`
 - `POST /api/v1/subscriptions/webhooks/google`
+- `GET /api/v1/notifications?page=0&size=20`
+- `GET /api/v1/notifications/unread-count`
+- `GET /api/v1/notifications/preferences`
+- `PUT /api/v1/notifications/preferences`
+- `PATCH /api/v1/notifications/{notificationId}/read`
 
 ## Configuration
 
@@ -53,6 +61,8 @@ Copy `.env.example` to `.env` and replace all example secrets. Runtime values ar
 
 - Money uses `BigDecimal` and ISO 4217 currency codes.
 - Expense creation validates that shares add up exactly to the expense total.
+- The payer can edit or delete an expense. Changes and deletions produce balance correction events; audit snapshots retain the full history.
+- Expense category, notes, and receipt metadata are stored with the expense. Receipt files require a separate storage provider; this API stores only their metadata and storage key.
 - Registration sends an email verification token and does not create a session. Login requires a verified email.
 - Successful login returns a short-lived access token and a rotating refresh token. Refresh token reuse revokes its full token family, and logout revokes that family.
 - Logout does not invalidate an already issued access token; it remains usable until its one-hour expiry.
@@ -67,6 +77,7 @@ Copy `.env.example` to `.env` and replace all example secrets. Runtime values ar
 - Store notification deduplication and subscription changes commit together; PostgreSQL transaction locks serialize duplicate deliveries and activation for the same store reference.
 - Apple verification uses Apple's server library to validate signed transactions and Notification V2 payloads against configured Apple root certificates.
 - Actuator health and Prometheus endpoints are exposed for operational visibility.
+- Notification inbox and push preferences are per user. Inbox results are paged, and unread counts include only visible inbox records.
 
 ## Execution boundary
 
@@ -85,3 +96,7 @@ Provider references: [Pub/Sub push authentication](https://docs.cloud.google.com
 The included email verification sender logs tokens for local development. Set `EMAIL_VERIFICATION_LOGGING_ENABLED=false` in deployed environments and provide an `EmailVerificationSender` adapter that delivers the token through the chosen email provider. The service intentionally fails to start if verification logging is disabled without another sender.
 
 Refresh and verification tokens are generated from secure random bytes. Only their SHA-256 hashes are stored. Login throttling defaults to five failures within 15 minutes followed by a 15-minute block; the durations and threshold are environment configurable.
+
+## Push delivery setup
+
+The notification service stores pending push deliveries transactionally with their source event. A `PushProvider` adapter must be supplied before `PUSH_DELIVERY_ENABLED=true`; without one, the service cannot start in push mode. The dispatcher retries failed deliveries with backoff and stops after ten attempts. Provider calls should use the notification ID as their idempotency key because a process can stop after sending but before marking delivery complete. Device tokens are stored in the notification database and must be handled as sensitive data.
