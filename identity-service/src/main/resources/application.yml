@@ -1,0 +1,32 @@
+server:
+  port: 8081
+spring:
+  application:
+    name: identity-service
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/splitease_identity}
+    username: ${POSTGRES_USER:splitease}
+    password: ${POSTGRES_PASSWORD:change-me}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+security:
+  jwt:
+    secret: ${JWT_SECRET:replace-with-at-least-32-characters}
+    lifetime: PT1H
+  refresh-token:
+    lifetime: ${REFRESH_TOKEN_LIFETIME:P30D}
+  email-verification:
+    lifetime: ${EMAIL_VERIFICATION_LIFETIME:PT24H}
+    logging-sender:
+      enabled: ${EMAIL_VERIFICATION_LOGGING_ENABLED:true}
+  login-throttle:
+    maximum-attempts: ${LOGIN_MAXIMUM_ATTEMPTS:5}
+    attempt-window: ${LOGIN_ATTEMPT_WINDOW:PT15M}
+    block-duration: ${LOGIN_BLOCK_DURATION:PT15M}
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka}
+management.endpoints.web.exposure.include: health,info,prometheus

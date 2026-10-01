@@ -1,0 +1,28 @@
+server.port: 8085
+spring:
+  application.name: subscription-service
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/splitease_subscriptions}
+    username: ${POSTGRES_USER:splitease}
+    password: ${POSTGRES_PASSWORD:change-me}
+  data.redis:
+    host: ${REDIS_HOST:localhost}
+    port: ${REDIS_PORT:6379}
+  jpa:
+    open-in-view: false
+    hibernate.ddl-auto: validate
+eureka.client.service-url.defaultZone: ${EUREKA_URL:http://localhost:8761/eureka}
+management.endpoints.web.exposure.include: health,info,prometheus
+stores:
+  google:
+    enabled: ${GOOGLE_PLAY_VERIFICATION_ENABLED:false}
+    package-name: ${GOOGLE_PLAY_PACKAGE_NAME:com.splitease.app}
+    push-audience: ${GOOGLE_PLAY_PUSH_AUDIENCE:}
+    push-service-account-email: ${GOOGLE_PLAY_PUSH_SERVICE_ACCOUNT_EMAIL:}
+    push-subscription: ${GOOGLE_PLAY_PUSH_SUBSCRIPTION:}
+  apple:
+    enabled: ${APPLE_STORE_VERIFICATION_ENABLED:false}
+    bundle-id: ${APPLE_BUNDLE_ID:com.splitease.app}
+    app-apple-id: ${APPLE_APP_ID:0}
+    environment: ${APPLE_STORE_ENVIRONMENT:PRODUCTION}
+    root-certificate-paths: ${APPLE_ROOT_CERTIFICATE_PATHS:}
