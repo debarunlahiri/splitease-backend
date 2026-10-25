@@ -9,6 +9,5 @@ public record AuthResponse(
         String refreshToken,
         Instant refreshTokenExpiresAt,
         UserView user) {
-    public record UserView(UUID id, String email, String displayName) {
-    }
+    public record UserView(UUID id, String email, String displayName, String photoUrl) {}
 }

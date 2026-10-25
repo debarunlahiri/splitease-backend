@@ -51,6 +51,7 @@ public class AuthenticationFilter implements GlobalFilter, Ordered {
                     .build()
                     .parseSignedClaims(authorization.substring(7))
                     .getPayload();
+            exchange.getAttributes().put("audit.userId", claims.getSubject());
             ServerWebExchange authenticatedExchange = exchange.mutate()
                     .request(request -> request.headers(headers -> {
                         headers.remove("X-User-Id");

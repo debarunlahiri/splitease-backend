@@ -23,3 +23,12 @@ target/
 *.log
 logs/
 *.pid
+
+# Local service lifecycle state
+.runtime/
+
+# Android Firebase configuration is not a backend Admin credential
+/google-services.json
+
+# Firebase Admin private credential
+/serviceAccountKey.json

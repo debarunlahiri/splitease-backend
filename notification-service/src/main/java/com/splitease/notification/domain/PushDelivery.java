@@ -1,32 +1,36 @@
 package com.splitease.notification.domain;
 
-import java.time.Instant;
-import java.util.UUID;
-
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+import java.time.Instant;
+import java.util.UUID;
+
 @Entity
 @Table(name = "push_deliveries")
 public class PushDelivery {
-    @Id
-    private UUID id;
+    @Id private UUID id;
+
     @Column(nullable = false, unique = true)
     private UUID notificationId;
+
     @Column(nullable = false)
     private UUID userId;
+
     @Column(nullable = false)
     private Instant nextAttemptAt;
+
     @Column(nullable = false)
     private int attempts;
+
     private Instant deliveredAt;
+
     @Column(length = 500)
     private String lastError;
 
-    protected PushDelivery() {
-    }
+    protected PushDelivery() {}
 
     public PushDelivery(UUID notificationId, UUID userId) {
         this.id = UUID.randomUUID();
@@ -35,8 +39,13 @@ public class PushDelivery {
         this.nextAttemptAt = Instant.now();
     }
 
-    public UUID getNotificationId() { return notificationId; }
-    public UUID getUserId() { return userId; }
+    public UUID getNotificationId() {
+        return notificationId;
+    }
+
+    public UUID getUserId() {
+        return userId;
+    }
 
     public void delivered() {
         deliveredAt = Instant.now();
@@ -45,7 +54,10 @@ public class PushDelivery {
 
     public void retry(String reason) {
         attempts++;
-        lastError = reason == null ? "Push provider failed" : reason.substring(0, Math.min(reason.length(), 500));
+        lastError =
+                reason == null
+                        ? "Push provider failed"
+                        : reason.substring(0, Math.min(reason.length(), 500));
         if (attempts >= 10) {
             nextAttemptAt = Instant.now().plusSeconds(365L * 24 * 60 * 60);
         } else {

@@ -1,5 +1,7 @@
 package com.splitease.settlement.controller;
 
+import com.splitease.common.idempotency.IdempotentRequest;
+
 import java.util.List;
 import java.util.UUID;
 
@@ -33,6 +35,7 @@ public class SettlementController {
         this.balanceQueryService = balanceQueryService;
     }
 
+    @IdempotentRequest
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public SettlementDtos.View record(@RequestHeader("X-User-Id") UUID payerId,

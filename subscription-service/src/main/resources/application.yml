@@ -1,8 +1,8 @@
-server.port: 8085
+server.port: 9895
 spring:
   application.name: subscription-service
   datasource:
-    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/splitease_subscriptions}
+    url: ${DATABASE_URL:jdbc:postgresql://127.0.0.1:15432/splitease_subscriptions}
     username: ${POSTGRES_USER:splitease}
     password: ${POSTGRES_PASSWORD:change-me}
   data.redis:
@@ -11,7 +11,7 @@ spring:
   jpa:
     open-in-view: false
     hibernate.ddl-auto: validate
-eureka.client.service-url.defaultZone: ${EUREKA_URL:http://localhost:8761/eureka}
+eureka.client.service-url.defaultZone: ${EUREKA_URL:http://localhost:9897/eureka}
 management.endpoints.web.exposure.include: health,info,prometheus
 stores:
   google:
@@ -26,3 +26,14 @@ stores:
     app-apple-id: ${APPLE_APP_ID:0}
     environment: ${APPLE_STORE_ENVIRONMENT:PRODUCTION}
     root-certificate-paths: ${APPLE_ROOT_CERTIFICATE_PATHS:}
+
+logging.pattern.level: "%5p [requestId:%X{requestId:-none}]"
+
+# Small elastic pools for a local multi-service deployment.
+spring.datasource.hikari.maximum-pool-size: ${DB_POOL_MAX_SIZE:3}
+spring.datasource.hikari.minimum-idle: ${DB_POOL_MIN_IDLE:0}
+spring.datasource.hikari.idle-timeout: 60000
+server.tomcat.threads.max: ${HTTP_MAX_THREADS:16}
+server.tomcat.threads.min-spare: 1
+server.tomcat.max-connections: 128
+spring.jpa.properties.hibernate.default_batch_fetch_size: 32

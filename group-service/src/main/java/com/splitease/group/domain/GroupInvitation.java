@@ -1,46 +1,60 @@
 package com.splitease.group.domain;
 
-import java.time.Instant;
-import java.util.UUID;
-
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
 
+import java.time.Instant;
+import java.util.UUID;
+
 @Entity
 @Table(name = "group_invitations")
 public class GroupInvitation {
-    @Id
-    private UUID id;
+    @Id private UUID id;
+
     @Column(nullable = false)
     private UUID groupId;
-    @Column(nullable = false)
+
     private UUID inviteeUserId;
+
+    @Column(length = 320)
+    private String inviteeEmail;
+
     @Column(nullable = false)
     private UUID invitedBy;
+
     @Column(nullable = false, length = 20)
     private String status;
+
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
+
     @Column(nullable = false)
     private Instant expiresAt;
+
     private Instant respondedAt;
-    @Version
-    private long version;
+    @Version private long version;
 
-    protected GroupInvitation() {
-    }
+    protected GroupInvitation() {}
 
-    public GroupInvitation(UUID groupId, UUID inviteeUserId, UUID invitedBy, Instant expiresAt) {
+    public GroupInvitation(UUID groupId, String inviteeEmail, UUID invitedBy, Instant expiresAt) {
         this.id = UUID.randomUUID();
         this.groupId = groupId;
-        this.inviteeUserId = inviteeUserId;
+        this.inviteeEmail = inviteeEmail;
         this.invitedBy = invitedBy;
         this.status = "PENDING";
         this.createdAt = Instant.now();
         this.expiresAt = expiresAt;
+    }
+
+    public String getInviteeEmail() {
+        return inviteeEmail;
+    }
+
+    public void bindRecipient(UUID userId) {
+        this.inviteeUserId = userId;
     }
 
     public UUID getId() {

@@ -1,24 +1,26 @@
 package com.splitease.group.service;
 
-import java.time.Duration;
-import java.time.Instant;
-import java.util.UUID;
-
-import com.splitease.common.exception.ConflictException;
-import com.splitease.common.exception.NotFoundException;
 import com.splitease.common.api.PageLimits;
 import com.splitease.common.api.PageResponse;
+import com.splitease.common.exception.ConflictException;
+import com.splitease.common.exception.NotFoundException;
 import com.splitease.group.domain.ExpenseGroup;
 import com.splitease.group.domain.GroupInvitation;
 import com.splitease.group.dto.GroupDtos;
 import com.splitease.group.repository.ExpenseGroupRepository;
 import com.splitease.group.repository.GroupInvitationRepository;
+
 import jakarta.persistence.EntityManager;
+
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.Sort;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
-import org.springframework.data.domain.Sort;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.util.UUID;
 
 @Service
 public class GroupInvitationService {
@@ -26,77 +28,107 @@ public class GroupInvitationService {
     private final GroupInvitationRepository invitations;
     private final EntityManager entityManager;
     private final Duration lifetime;
+    private final OutboxService outbox;
 
     public GroupInvitationService(
             ExpenseGroupRepository groups,
             GroupInvitationRepository invitations,
             EntityManager entityManager,
+            OutboxService outbox,
             @Value("${groups.invitation-lifetime:P7D}") Duration lifetime) {
         this.groups = groups;
         this.invitations = invitations;
         this.entityManager = entityManager;
+        this.outbox = outbox;
         this.lifetime = lifetime;
     }
 
     @Transactional
-    public GroupDtos.InvitationView create(UUID ownerId, UUID groupId, GroupDtos.Invite request) {
+    public GroupDtos.InvitationView create(
+            UUID ownerId, String ownerEmail, UUID groupId, GroupDtos.Invite request) {
         lockGroup(groupId);
         ExpenseGroup group = requiredGroup(groupId);
         requireOwner(group, ownerId);
-        if (group.contains(request.userId())) {
-            throw new ConflictException("User is already a group member");
+        String email = normalizeEmail(request.email());
+        if (email.equals(normalizeEmail(ownerEmail))) {
+            throw new ConflictException("You already belong to this group");
         }
-        invitations.findByGroupIdAndInviteeUserIdAndStatus(groupId, request.userId(), "PENDING")
-                .ifPresent(existing -> {
-                    if (!existing.expireIfNeeded(Instant.now())) {
-                        throw new ConflictException("A pending invitation already exists");
-                    }
-                });
+        invitations
+                .findByGroupIdAndInviteeEmailAndStatus(groupId, email, "PENDING")
+                .ifPresent(
+                        existing -> {
+                            if (!existing.expireIfNeeded(Instant.now())) {
+                                throw new ConflictException("A pending invitation already exists");
+                            }
+                        });
         invitations.flush();
-        GroupInvitation invitation = invitations.save(new GroupInvitation(
-                groupId, request.userId(), ownerId, Instant.now().plus(lifetime)));
+        GroupInvitation invitation =
+                invitations.save(
+                        new GroupInvitation(groupId, email, ownerId, Instant.now().plus(lifetime)));
+        outbox.append(
+                "invitation.created",
+                groupId.toString(),
+                invitation.getId(),
+                new com.splitease.common.event.InvitationCreatedEvent(
+                        UUID.randomUUID(),
+                        invitation.getId(),
+                        groupId,
+                        group.getName(),
+                        email,
+                        ownerId,
+                        invitation.getExpiresAt(),
+                        Instant.now()));
         return view(invitation);
     }
 
     @Transactional
-    public PageResponse<GroupDtos.InvitationView> inbox(UUID userId, int page, int size) {
-        return PageResponse.from(invitations.findByInviteeUserId(userId, pageRequest(page, size))
-                .map(invitation -> {
-                    invitation.expireIfNeeded(Instant.now());
-                    return view(invitation);
-                }));
+    public PageResponse<GroupDtos.InvitationView> inbox(
+            UUID userId, String email, int page, int size) {
+        return PageResponse.from(
+                invitations
+                        .inbox(userId, normalizeEmail(email), pageRequest(page, size))
+                        .map(
+                                invitation -> {
+                                    invitation.expireIfNeeded(Instant.now());
+                                    return view(invitation);
+                                }));
     }
 
     @Transactional
     public PageResponse<GroupDtos.InvitationView> forGroup(
             UUID ownerId, UUID groupId, int page, int size) {
         requireOwner(requiredGroup(groupId), ownerId);
-        return PageResponse.from(invitations.findByGroupId(groupId, pageRequest(page, size))
-                .map(invitation -> {
-                    invitation.expireIfNeeded(Instant.now());
-                    return view(invitation);
-                }));
+        return PageResponse.from(
+                invitations
+                        .findByGroupId(groupId, pageRequest(page, size))
+                        .map(
+                                invitation -> {
+                                    invitation.expireIfNeeded(Instant.now());
+                                    return view(invitation);
+                                }));
     }
 
     @Transactional(noRollbackFor = ConflictException.class)
-    public GroupDtos.InvitationView accept(UUID userId, UUID invitationId) {
+    public GroupDtos.InvitationView accept(UUID userId, String email, UUID invitationId) {
         GroupInvitation invitation = requiredInvitation(invitationId);
-        requireInvitee(invitation, userId);
+        requireInvitee(invitation, userId, email);
         requirePending(invitation);
         ExpenseGroup group = requiredGroup(invitation.getGroupId());
         if (group.contains(userId)) {
             throw new ConflictException("User is already a group member");
         }
         group.addMember(userId, "MEMBER");
+        invitation.bindRecipient(userId);
         invitation.accept(Instant.now());
         return view(invitation);
     }
 
     @Transactional(noRollbackFor = ConflictException.class)
-    public GroupDtos.InvitationView decline(UUID userId, UUID invitationId) {
+    public GroupDtos.InvitationView decline(UUID userId, String email, UUID invitationId) {
         GroupInvitation invitation = requiredInvitation(invitationId);
-        requireInvitee(invitation, userId);
+        requireInvitee(invitation, userId, email);
         requirePending(invitation);
+        invitation.bindRecipient(userId);
         invitation.decline(Instant.now());
         return view(invitation);
     }
@@ -111,27 +143,30 @@ public class GroupInvitationService {
     }
 
     private ExpenseGroup requiredGroup(UUID groupId) {
-        return groups.findById(groupId)
-                .orElseThrow(() -> new NotFoundException("Group not found"));
+        return groups.findById(groupId).orElseThrow(() -> new NotFoundException("Group not found"));
     }
 
     private GroupInvitation requiredInvitation(UUID invitationId) {
-        GroupInvitation current = invitations.findById(invitationId)
-                .orElseThrow(() -> new NotFoundException("Invitation not found"));
+        GroupInvitation current =
+                invitations
+                        .findById(invitationId)
+                        .orElseThrow(() -> new NotFoundException("Invitation not found"));
         lockGroup(current.getGroupId());
-        return invitations.findLockedById(invitationId)
+        return invitations
+                .findLockedById(invitationId)
                 .orElseThrow(() -> new NotFoundException("Invitation not found"));
     }
 
     private void lockGroup(UUID groupId) {
-        entityManager.createNativeQuery("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))")
+        entityManager
+                .createNativeQuery("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))")
                 .setParameter("key", "group-invitations:" + groupId)
                 .getSingleResult();
     }
 
     private org.springframework.data.domain.PageRequest pageRequest(int page, int size) {
-        return PageLimits.request(page, size, Sort.by(Sort.Order.desc("createdAt"),
-                Sort.Order.desc("id")));
+        return PageLimits.request(
+                page, size, Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")));
     }
 
     private void requireOwner(ExpenseGroup group, UUID userId) {
@@ -140,10 +175,21 @@ public class GroupInvitationService {
         }
     }
 
-    private void requireInvitee(GroupInvitation invitation, UUID userId) {
-        if (!invitation.getInviteeUserId().equals(userId)) {
+    private void requireInvitee(GroupInvitation invitation, UUID userId, String email) {
+        boolean ownsLegacyInvitation = userId.equals(invitation.getInviteeUserId());
+        boolean ownsEmailInvitation =
+                invitation.getInviteeUserId() == null
+                        && normalizeEmail(email).equals(invitation.getInviteeEmail());
+        if (!ownsLegacyInvitation && !ownsEmailInvitation) {
             throw new AccessDeniedException("Only the invited user can respond");
         }
+    }
+
+    private String normalizeEmail(String email) {
+        if (email == null || email.isBlank()) {
+            throw new AccessDeniedException("An authenticated email is required");
+        }
+        return email.trim().toLowerCase(java.util.Locale.ROOT);
     }
 
     private void requirePending(GroupInvitation invitation) {
@@ -156,8 +202,15 @@ public class GroupInvitationService {
     }
 
     private GroupDtos.InvitationView view(GroupInvitation invitation) {
-        return new GroupDtos.InvitationView(invitation.getId(), invitation.getGroupId(),
-                invitation.getInviteeUserId(), invitation.getInvitedBy(), invitation.getStatus(),
-                invitation.getCreatedAt(), invitation.getExpiresAt(), invitation.getRespondedAt());
+        return new GroupDtos.InvitationView(
+                invitation.getId(),
+                invitation.getGroupId(),
+                invitation.getInviteeUserId(),
+                invitation.getInvitedBy(),
+                invitation.getStatus(),
+                invitation.getCreatedAt(),
+                invitation.getExpiresAt(),
+                invitation.getRespondedAt(),
+                invitation.getInviteeEmail());
     }
 }

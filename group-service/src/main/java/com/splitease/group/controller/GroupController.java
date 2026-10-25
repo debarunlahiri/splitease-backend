@@ -1,12 +1,13 @@
 package com.splitease.group.controller;
 
-import java.util.UUID;
-
-import com.splitease.group.dto.GroupDtos;
 import com.splitease.common.api.PageResponse;
-import com.splitease.group.service.GroupService;
+import com.splitease.common.idempotency.IdempotentRequest;
+import com.splitease.group.dto.GroupDtos;
 import com.splitease.group.service.GroupInvitationService;
+import com.splitease.group.service.GroupService;
+
 import jakarta.validation.Valid;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -17,6 +18,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/groups")
@@ -29,11 +32,11 @@ public class GroupController {
         this.invitations = invitations;
     }
 
+    @IdempotentRequest
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public GroupDtos.View create(
-            @RequestHeader("X-User-Id") UUID userId,
-            @Valid @RequestBody GroupDtos.Create request) {
+            @RequestHeader("X-User-Id") UUID userId, @Valid @RequestBody GroupDtos.Create request) {
         return groupService.create(userId, request);
     }
 
@@ -45,13 +48,15 @@ public class GroupController {
         return groupService.list(userId, page, size);
     }
 
+    @IdempotentRequest
     @PostMapping("/{groupId}/invitations")
     @ResponseStatus(HttpStatus.CREATED)
     public GroupDtos.InvitationView invite(
             @RequestHeader("X-User-Id") UUID userId,
+            @RequestHeader("X-User-Email") String email,
             @PathVariable UUID groupId,
             @Valid @RequestBody GroupDtos.Invite request) {
-        return invitations.create(userId, groupId, request);
+        return invitations.create(userId, email, groupId, request);
     }
 
     @GetMapping("/{groupId}/invitations")
@@ -66,29 +71,34 @@ public class GroupController {
     @GetMapping("/invitations/me")
     public PageResponse<GroupDtos.InvitationView> myInvitations(
             @RequestHeader("X-User-Id") UUID userId,
+            @RequestHeader("X-User-Email") String email,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return invitations.inbox(userId, page, size);
+        return invitations.inbox(userId, email, page, size);
     }
 
+    @IdempotentRequest
     @PostMapping("/invitations/{invitationId}/accept")
     public GroupDtos.InvitationView accept(
             @RequestHeader("X-User-Id") UUID userId,
+            @RequestHeader("X-User-Email") String email,
             @PathVariable UUID invitationId) {
-        return invitations.accept(userId, invitationId);
+        return invitations.accept(userId, email, invitationId);
     }
 
+    @IdempotentRequest
     @PostMapping("/invitations/{invitationId}/decline")
     public GroupDtos.InvitationView decline(
             @RequestHeader("X-User-Id") UUID userId,
+            @RequestHeader("X-User-Email") String email,
             @PathVariable UUID invitationId) {
-        return invitations.decline(userId, invitationId);
+        return invitations.decline(userId, email, invitationId);
     }
 
+    @IdempotentRequest
     @PostMapping("/invitations/{invitationId}/revoke")
     public GroupDtos.InvitationView revoke(
-            @RequestHeader("X-User-Id") UUID userId,
-            @PathVariable UUID invitationId) {
+            @RequestHeader("X-User-Id") UUID userId, @PathVariable UUID invitationId) {
         return invitations.revoke(userId, invitationId);
     }
 }

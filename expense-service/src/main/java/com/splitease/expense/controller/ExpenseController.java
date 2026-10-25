@@ -1,5 +1,7 @@
 package com.splitease.expense.controller;
 
+import com.splitease.common.idempotency.IdempotentRequest;
+
 import java.util.UUID;
 
 import com.splitease.expense.dto.ExpenseDtos;
@@ -26,6 +28,7 @@ public class ExpenseController {
 
     public ExpenseController(ExpenseService expenseService) { this.expenseService = expenseService; }
 
+    @IdempotentRequest
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public ExpenseDtos.View create(@RequestHeader("X-User-Id") UUID userId,
@@ -42,6 +45,7 @@ public class ExpenseController {
         return expenseService.byGroup(userId, groupId, page, size);
     }
 
+    @IdempotentRequest
     @PutMapping("/{expenseId}")
     public ExpenseDtos.View update(
             @RequestHeader("X-User-Id") UUID userId,
@@ -50,6 +54,7 @@ public class ExpenseController {
         return expenseService.update(userId, expenseId, request);
     }
 
+    @IdempotentRequest
     @DeleteMapping("/{expenseId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@RequestHeader("X-User-Id") UUID userId, @PathVariable UUID expenseId) {

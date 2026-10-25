@@ -1,9 +1,11 @@
 package com.splitease.subscription.controller;
 
 import com.splitease.subscription.service.AppleStoreWebhookService;
+
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -13,7 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/v1/subscriptions/webhooks/apple")
-@ConditionalOnBean(AppleStoreWebhookService.class)
+@ConditionalOnProperty(prefix = "stores.apple", name = "enabled", havingValue = "true")
 public class AppleStoreWebhookController {
     private final AppleStoreWebhookService webhookService;
 
@@ -27,7 +29,5 @@ public class AppleStoreWebhookController {
         webhookService.process(body.signedPayload());
     }
 
-    public record AppleNotificationBody(@NotBlank String signedPayload) {
-    }
+    public record AppleNotificationBody(@NotBlank String signedPayload) {}
 }
-

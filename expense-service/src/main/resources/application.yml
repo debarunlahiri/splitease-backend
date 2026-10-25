@@ -1,8 +1,8 @@
-server.port: 8083
+server.port: 9893
 spring:
   application.name: expense-service
   datasource:
-    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/splitease_expenses}
+    url: ${DATABASE_URL:jdbc:postgresql://127.0.0.1:15432/splitease_expenses}
     username: ${POSTGRES_USER:splitease}
     password: ${POSTGRES_PASSWORD:change-me}
   jpa:
@@ -13,8 +13,19 @@ spring:
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
-eureka.client.service-url.defaultZone: ${EUREKA_URL:http://localhost:8761/eureka}
+eureka.client.service-url.defaultZone: ${EUREKA_URL:http://localhost:9897/eureka}
 management.endpoints.web.exposure.include: health,info,prometheus
-clients.group-service.base-url: ${GROUP_SERVICE_URL:http://localhost:8082}
+clients.group-service.base-url: ${GROUP_SERVICE_URL:http://localhost:9892}
 security.internal.service-key: ${INTERNAL_SERVICE_KEY:replace-with-an-internal-service-key}
 outbox.publish-delay: PT2S
+
+logging.pattern.level: "%5p [requestId:%X{requestId:-none}]"
+
+# Small elastic pools for a local multi-service deployment.
+spring.datasource.hikari.maximum-pool-size: ${DB_POOL_MAX_SIZE:3}
+spring.datasource.hikari.minimum-idle: ${DB_POOL_MIN_IDLE:0}
+spring.datasource.hikari.idle-timeout: 60000
+server.tomcat.threads.max: ${HTTP_MAX_THREADS:16}
+server.tomcat.threads.min-spare: 1
+server.tomcat.max-connections: 128
+spring.jpa.properties.hibernate.default_batch_fetch_size: 32

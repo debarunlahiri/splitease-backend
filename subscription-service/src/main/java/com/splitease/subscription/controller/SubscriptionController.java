@@ -1,5 +1,7 @@
 package com.splitease.subscription.controller;
 
+import com.splitease.common.idempotency.IdempotentRequest;
+
 import java.util.List;
 import java.util.UUID;
 
@@ -30,6 +32,7 @@ public class SubscriptionController {
         return subscriptionService.entitlement(userId);
     }
 
+    @IdempotentRequest
     @PostMapping("/me/purchases/verify")
     public SubscriptionDtos.Entitlement verifyPurchase(
             @RequestHeader("X-User-Id") UUID userId,

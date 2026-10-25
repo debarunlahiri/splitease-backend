@@ -1,12 +1,9 @@
 package com.splitease.common.api;
 
-import java.time.Instant;
-import java.util.LinkedHashMap;
-import java.util.Map;
-
 import com.splitease.common.exception.ConflictException;
 import com.splitease.common.exception.NotFoundException;
 import com.splitease.common.exception.TooManyRequestsException;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -14,9 +11,30 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+    @ExceptionHandler(ResponseStatusException.class)
+    ResponseEntity<ApiError> responseStatus(ResponseStatusException exception) {
+        int status = exception.getStatusCode().value();
+        return ResponseEntity.status(exception.getStatusCode())
+                .body(
+                        ApiError.of(
+                                status,
+                                "HTTP_" + status,
+                                status >= 500
+                                        ? "This service is temporarily unavailable. Please try"
+                                              + " again later."
+                                        : exception.getReason() == null
+                                                ? "Request could not be completed"
+                                                : exception.getReason()));
+    }
+
     @ExceptionHandler(NotFoundException.class)
     ResponseEntity<ApiError> notFound(NotFoundException exception) {
         return response(HttpStatus.NOT_FOUND, "NOT_FOUND", exception.getMessage());
@@ -50,10 +68,17 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MethodArgumentNotValidException.class)
     ResponseEntity<ApiError> validation(MethodArgumentNotValidException exception) {
         Map<String, String> fields = new LinkedHashMap<>();
-        exception.getBindingResult().getFieldErrors()
+        exception
+                .getBindingResult()
+                .getFieldErrors()
                 .forEach(error -> fields.putIfAbsent(error.getField(), error.getDefaultMessage()));
-        ApiError error = new ApiError(Instant.now(), HttpStatus.BAD_REQUEST.value(),
-                "VALIDATION_FAILED", "Request validation failed", fields);
+        ApiError error =
+                new ApiError(
+                        Instant.now(),
+                        HttpStatus.BAD_REQUEST.value(),
+                        "VALIDATION_FAILED",
+                        "Request validation failed",
+                        fields);
         return ResponseEntity.badRequest().body(error);
     }
 

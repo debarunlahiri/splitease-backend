@@ -1,22 +1,25 @@
 package com.splitease.notification.domain;
 
-import java.time.Instant;
-import java.util.UUID;
-
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+import java.time.Instant;
+import java.util.UUID;
+
 @Entity
 @Table(name = "processed_events")
 public class ProcessedEvent {
     @Id private UUID eventId;
-    @Column(nullable = false, length = 80) private String eventType;
-    @Column(nullable = false, updatable = false) private Instant processedAt;
 
-    protected ProcessedEvent() {
-    }
+    @Column(nullable = false, length = 80)
+    private String eventType;
+
+    @Column(nullable = false, updatable = false)
+    private Instant processedAt;
+
+    protected ProcessedEvent() {}
 
     public ProcessedEvent(UUID eventId, String eventType) {
         this.eventId = eventId;
@@ -24,4 +27,3 @@ public class ProcessedEvent {
         this.processedAt = Instant.now();
     }
 }
-

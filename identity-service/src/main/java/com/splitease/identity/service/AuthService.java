@@ -6,6 +6,7 @@ import com.splitease.identity.dto.AuthRequests;
 import com.splitease.identity.dto.AuthResponse;
 import com.splitease.identity.repository.UserRepository;
 import com.splitease.identity.security.JwtService;
+
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -42,10 +43,12 @@ public class AuthService {
         if (users.existsByEmailIgnoreCase(request.email())) {
             throw new ConflictException("An account already exists for this email");
         }
-        User user = users.save(new User(
-                request.email(),
-                request.displayName(),
-                passwordEncoder.encode(request.password())));
+        User user =
+                users.save(
+                        new User(
+                                request.email(),
+                                request.displayName(),
+                                passwordEncoder.encode(request.password())));
         emailVerification.issue(user);
     }
 
@@ -69,8 +72,9 @@ public class AuthService {
     @Transactional(noRollbackFor = BadCredentialsException.class)
     public AuthResponse refresh(AuthRequests.Refresh request) {
         RefreshTokenService.Rotation rotation = refreshTokens.rotate(request.refreshToken());
-        User user = users.findById(rotation.userId())
-                .orElseThrow(() -> new BadCredentialsException("Invalid refresh token"));
+        User user =
+                users.findById(rotation.userId())
+                        .orElseThrow(() -> new BadCredentialsException("Invalid refresh token"));
         return response(user, rotation.token());
     }
 
@@ -87,6 +91,38 @@ public class AuthService {
         emailVerification.resend(request.email());
     }
 
+    @Transactional
+    public AuthResponse firebaseLogin(com.google.firebase.auth.FirebaseToken token) {
+        User user =
+                users.findByFirebaseUid(token.getUid())
+                        .orElseGet(
+                                () -> {
+                                    if (users.existsByEmailIgnoreCase(token.getEmail())) {
+                                        throw new ConflictException(
+                                                "An account already uses this email. Google sign-in"
+                                                    + " requires explicit account linking.");
+                                    }
+                                    String name =
+                                            token.getName() == null
+                                                    ? "SplitEase member"
+                                                    : token.getName();
+                                    User created =
+                                            new User(
+                                                    token.getEmail(),
+                                                    name.substring(0, Math.min(name.length(), 100)),
+                                                    passwordEncoder.encode(
+                                                            java.util
+                                                                    .UUID
+                                                                    .randomUUID()
+                                                                    .toString()));
+                                    created.linkFirebase(token.getUid());
+                                    created.verifyEmail(java.time.Instant.now());
+                                    return users.save(created);
+                                });
+        user.updatePhotoUrl(token.getPicture());
+        return response(user);
+    }
+
     private AuthResponse response(User user) {
         return response(user, refreshTokens.issue(user.getId()));
     }
@@ -98,6 +134,7 @@ public class AuthService {
                 token.expiresAt(),
                 refreshToken.value(),
                 refreshToken.expiresAt(),
-                new AuthResponse.UserView(user.getId(), user.getEmail(), user.getDisplayName()));
+                new AuthResponse.UserView(
+                        user.getId(), user.getEmail(), user.getDisplayName(), user.getPhotoUrl()));
     }
 }

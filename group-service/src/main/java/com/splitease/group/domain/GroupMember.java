@@ -1,8 +1,5 @@
 package com.splitease.group.domain;
 
-import java.time.Instant;
-import java.util.UUID;
-
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -11,23 +8,28 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 
+import java.time.Instant;
+import java.util.UUID;
+
 @Entity
 @Table(name = "group_members")
 public class GroupMember {
-    @Id
-    private UUID id;
+    @Id private UUID id;
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "group_id", nullable = false)
     private ExpenseGroup group;
+
     @Column(nullable = false)
     private UUID userId;
+
     @Column(nullable = false, length = 20)
     private String role;
+
     @Column(nullable = false, updatable = false)
     private Instant joinedAt;
 
-    protected GroupMember() {
-    }
+    protected GroupMember() {}
 
     GroupMember(ExpenseGroup group, UUID userId, String role) {
         this.id = UUID.randomUUID();
@@ -37,8 +39,15 @@ public class GroupMember {
         this.joinedAt = Instant.now();
     }
 
-    public UUID getUserId() { return userId; }
-    public String getRole() { return role; }
-    public Instant getJoinedAt() { return joinedAt; }
-}
+    public UUID getUserId() {
+        return userId;
+    }
 
+    public String getRole() {
+        return role;
+    }
+
+    public Instant getJoinedAt() {
+        return joinedAt;
+    }
+}
