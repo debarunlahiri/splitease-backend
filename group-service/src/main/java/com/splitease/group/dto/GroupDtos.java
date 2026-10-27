@@ -16,6 +16,12 @@ public final class GroupDtos {
             @NotBlank @Size(max = 120) String name,
             @Pattern(regexp = "[A-Za-z]{3}") String defaultCurrency) {}
 
+    public record InviteLink(String token, Instant expiresAt) {}
+
+    public record JoinLink(@NotBlank @Pattern(regexp = "[A-Za-z0-9_-]{43}") String token) {}
+
+    public record JoinedGroup(UUID groupId) {}
+
     public record Invite(@NotBlank @Email @Size(max = 320) String email) {}
 
     public record InvitationView(

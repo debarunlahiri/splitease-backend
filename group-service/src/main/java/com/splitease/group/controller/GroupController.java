@@ -48,6 +48,12 @@ public class GroupController {
         return groupService.list(userId, page, size);
     }
 
+    @GetMapping("/{groupId}")
+    public GroupDtos.View detail(
+            @RequestHeader("X-User-Id") UUID userId, @PathVariable UUID groupId) {
+        return groupService.detail(userId, groupId);
+    }
+
     @IdempotentRequest
     @PostMapping("/{groupId}/invitations")
     @ResponseStatus(HttpStatus.CREATED)

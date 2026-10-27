@@ -50,6 +50,17 @@ public class GroupService {
     }
 
     @Transactional(readOnly = true)
+    public GroupDtos.View detail(UUID userId, UUID groupId) {
+        ExpenseGroup group = required(groupId);
+        if (!group.contains(userId)) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "Group membership required");
+        }
+        var ids = group.getMembers().stream().map(member -> member.getUserId()).toList();
+        return view(group, profiles.names(ids));
+    }
+
+    @Transactional(readOnly = true)
     public GroupMembershipSnapshot membership(UUID groupId) {
         ExpenseGroup group = required(groupId);
         return new GroupMembershipSnapshot(
