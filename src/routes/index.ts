@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { inviteLandingPage } from '../controllers/landing.controller';
 import { health } from '../controllers/health.controller';
+import { brandLogoPath, brandLogoUrl } from '../utils/brand';
 import { appRouter } from './app.routes';
 import { authRouter } from './auth.routes';
 import { expensesRouter } from './expense.routes';
@@ -17,6 +18,11 @@ export const routes = Router();
 routes.get('/health', health);
 routes.get('/actuator/health', health);
 routes.get('/join', inviteLandingPage);
+routes.get(brandLogoUrl, (_req, res, next) => {
+    res.sendFile(brandLogoPath, { maxAge: '1d' }, (error) => {
+        if (error) next(error);
+    });
+});
 
 routes.use('/api/v1/app', appRouter);
 routes.use('/api/v1/auth', authRouter);

@@ -11,6 +11,7 @@ import {
     Topics,
 } from '../events/types';
 import { logger } from '../utils/logger';
+import { brandLogoPath } from '../utils/brand';
 
 // ---------------------------------------------------------------- transport
 
@@ -20,6 +21,7 @@ export function mailEnabled(): boolean {
 }
 
 let transporter: Transporter | undefined;
+const BRAND_LOGO_CID = 'splitease-logo@lambrk.com';
 
 function transport(): Transporter {
     transporter ??= nodemailer.createTransport({
@@ -53,6 +55,9 @@ async function deliver(mail: Mail): Promise<void> {
         subject: mail.subject,
         html: mail.html,
         text: `${mail.text.trimEnd()}\n\n--\n${POWERED_BY_TEXT}\n`,
+        attachments: mail.html.includes(`src="cid:${BRAND_LOGO_CID}"`)
+            ? [{ filename: 'splitease-logo.png', path: brandLogoPath, cid: BRAND_LOGO_CID }]
+            : undefined,
     });
 }
 
@@ -300,6 +305,7 @@ ${hidden}
   <tr><td align="center" style="padding:32px 16px">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px">
       <tr><td bgcolor="${GREEN}" style="padding:24px 32px;border-radius:12px 12px 0 0">
+        <img src="cid:${BRAND_LOGO_CID}" width="42" height="42" alt="" style="vertical-align:middle;margin-right:8px">
         <span style="font:700 22px ${FONT};color:#ffffff;letter-spacing:0.3px">${brand}</span>
       </td></tr>
       <tr><td bgcolor="#ffffff" style="padding:36px 32px 32px;border-radius:0 0 12px 12px;font:16px/1.6 ${FONT};color:${INK}">
