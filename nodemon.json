@@ -1,0 +1,9 @@
+{
+  "watch": ["src", "migrations", ".env"],
+  "ext": "ts,json,sql",
+  "ignore": ["node_modules", "dist"],
+  "exec": "tsx src/server.ts",
+  "signal": "SIGTERM",
+  "env": { "NODE_OPTIONS": "--disable-warning=DEP0040" },
+  "delay": 300
+}

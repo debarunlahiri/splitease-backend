@@ -1,0 +1,18 @@
+node_modules/
+dist/
+
+# Local environment and provider credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*service-account*.json
+serviceAccountKey.json
+google-services.json
+
+*.log
+logs/
+.DS_Store
+.idea/
+.vscode/
