@@ -38,6 +38,13 @@ async function main(): Promise<void> {
         logger.info(`SplitEase backend listening on port ${config.port}`);
     });
 
+    // Node closes idle keep-alive connections after 5 seconds by default, while mobile clients
+    // keep them pooled much longer. A client that reuses a connection the server just closed gets
+    // a "connection reset" on its first request. Keep them open for longer than the clients do
+    // (and headersTimeout must stay above keepAliveTimeout).
+    server.keepAliveTimeout = 65_000;
+    server.headersTimeout = 66_000;
+
     let shuttingDown = false;
     const shutdown = (signal: string) => {
         if (shuttingDown) return;

@@ -42,7 +42,17 @@ async function main(): Promise<void> {
         if (!result.rowCount) throw new Error('No admin with that email');
         console.log(`Password reset for ${email}.`);
     } else {
-        await createAdmin(email, name, password);
+        try {
+            await createAdmin(email, name, password);
+        } catch (error) {
+            if ((error as { code?: string }).code === '23505') {
+                throw new Error(
+                    `An admin with ${email} already exists. To set a new password run:\n` +
+                        `  npm run admin -- --email ${email} --name "${name}" --reset`,
+                );
+            }
+            throw error;
+        }
         console.log(`Admin created: ${email}`);
     }
     if (generated) console.log(`Password (shown once): ${password}`);

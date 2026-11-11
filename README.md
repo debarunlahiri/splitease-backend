@@ -72,10 +72,159 @@ Each expense can contain five files, up to 10 MiB per file. Migration
 `006_expense_attachments.sql` adds attachment storage. If the API is behind a
 reverse proxy, allow requests of at least 10 MiB on the attachment upload route.
 
+## Admin dashboard
+
+The dashboard lives in the website project (`splitease-web`, under `/admin`). This service
+provides its API under `/api/v1/admin`. Admins are separate from app users: their own table
+(`admin_users`), their own sign-in and their own token secret, so an admin token can never act
+as an app user and the other way round. The website calls this API from its server, so no CORS
+settings are needed for it.
+
+### Turn it on
+
+1. Set a secret of at least 32 characters in `.env`. Without it the admin API stays off
+   (every admin request answers 503).
+
+   ```bash
+   echo "ADMIN_JWT_SECRET=$(openssl rand -base64 36 | tr -d '\n')" >> .env
+   ```
+
+   `ADMIN_JWT_LIFETIME` (default `PT8H`) sets how long an admin stays signed in.
+
+2. Apply the migrations (`008_admin_users.sql` and `009_admin_actions.sql`). They run on
+   startup, or on demand:
+
+   ```bash
+   npm run migrate
+   ```
+
+3. Create the first admin. A random password is printed once, so save it:
+
+   ```bash
+   npm run admin -- --email you@example.com --name "Your Name"
+   ```
+
+   Pass `--password <text>` (at least 10 characters) to choose your own. More admins can be
+   added later in the dashboard (Admins page).
+
+4. Sign in on the website at `/admin`. Change the password afterwards (Admins, then
+   "Change my password").
+
+Forgot the password, or the account was disabled:
+
+```bash
+npm run admin -- --email you@example.com --name "Your Name" --reset
+```
+
+### Deploying it to production
+
+The server runs the compiled code in `dist/`, not the source. Running `npm run admin` works from
+source, so it succeeding does not mean the running server knows the admin routes. After pulling
+or copying new code, always rebuild and restart:
+
+```bash
+npm ci && npm run build && pm2 restart splitease-backend
+```
+
+Redeploy the website as well (see its README), so the login page and the `/admin` pages exist.
+
+### Troubleshooting sign-in
+
+Test the backend directly on the server (use your real password):
+
+```bash
+curl -i -X POST http://localhost:9890/api/v1/admin/auth/login \
+  -H 'content-type: application/json' \
+  -d '{"email":"you@example.com","password":"YOUR_PASSWORD"}'
+```
+
+| Answer | Meaning | Fix |
+| --- | --- | --- |
+| `200` with a token | The backend is fine | Redeploy the website |
+| `401`, empty body | The running server is an old build without admin routes | `npm run build`, then restart |
+| `401`, JSON `Invalid email or password` | Wrong password, or the server uses a different database than the script | Run the `--reset` command above; check `DATABASE_URL` |
+| `429` | Five failed attempts from one address in 15 minutes | Wait 15 minutes |
+| `503` | `ADMIN_JWT_SECRET` is missing or shorter than 32 characters | Set it, restart |
+
+"An admin with that email already exists" when creating means the account is there already;
+use `--reset` to set a new password.
+
+### What admins can do
+
+Every change is recorded in `admin_audit` (who, what, when) and shown on the Activity log page.
+
+| Area | Actions |
+| --- | --- |
+| Overview | Totals, 30-day signups, spend by currency, subscription sales, items needing attention |
+| Users | Search; edit name; send a notification or email; resend verification; mark email verified; sign out of all devices; suspend or restore; delete |
+| Groups | Search; rename; delete (removes its expenses, settlements and balances) |
+| Expenses | List per group (including deleted); view split, history and attachments; delete (uses the app's own delete, so balances are reversed); remove an attachment |
+| Subscriptions | List; grant a plan free of charge; extend; cancel or reactivate |
+| Plans | Create, edit, hide or show, delete (only plans never subscribed to) |
+| Announcements | Send an in-app notification, with optional push, to everyone, verified or premium users |
+| Send email | Templated, formal emails to one user, an audience, the iOS waitlist or the admins (see below) |
+| App releases | Publish, withdraw, delete (same table as `npm run app-version`) |
+| iOS waitlist | Search, remove, export CSV |
+| Email queue | View delivery state, retry failed emails, discard unsent ones |
+| Admins | Add, disable or enable, change your own password |
+
+Safety rules built into the API:
+
+- **Suspending** a user revokes their refresh tokens and blocks sign-in, token refresh and Google
+  sign-in. An access token they already hold keeps working until it expires (`JWT_LIFETIME`,
+  1 hour by default).
+- **Deleting a user** only works for accounts that never joined a group or expense. Otherwise it
+  answers 409 and you suspend instead, because deleting would break other people's balances.
+- **Deleting an expense** goes through the app's expense service, so balance projections and
+  events stay consistent. The event is attributed to the payer, because app events need an app
+  user id; the audit log records which admin really did it.
+- **Email bodies** are never returned by the API (they can hold sign-in links and codes).
+- **Attachments** are served inline only for PNG, JPEG, GIF, WebP and PDF; any other type is
+  forced to download. Responses are `no-store`.
+- The last enabled admin cannot be disabled, and admins cannot disable themselves.
+
+### Admin API
+
+All routes are under `/api/v1/admin` and need `Authorization: Bearer <admin token>`, except
+`POST /auth/login`.
+
+| Area | Routes |
+| --- | --- |
+| Auth | `POST /auth/login`, `GET /auth/me`, `POST /auth/password` |
+| Overview | `GET /overview` |
+| Users | `GET /users`, `GET /users/:id`, `PATCH /users/:id`, `POST /users/:id/{suspend,restore,delete,revoke-sessions,verify-email,resend-verification,notify}` |
+| Groups | `GET /groups`, `GET /groups/:id`, `PATCH /groups/:id`, `POST /groups/:id/delete`, `GET /groups/:id/expenses` |
+| Expenses | `GET /expenses/:id`, `POST /expenses/:id/delete`, `GET /attachments/:id`, `POST /attachments/:id/remove` |
+| Subscriptions | `GET /subscriptions`, `POST /subscriptions/grant`, `POST /subscriptions/:id/{cancel,reactivate,extend}` |
+| Plans | `GET /plans`, `POST /plans`, `PATCH /plans/:id`, `POST /plans/:id/delete` |
+| Announcements | `GET /announcements/audience`, `POST /announcements` |
+| Email | `GET /mail/templates`, `GET /mail/audiences`, `POST /mail/{preview,test,send}` |
+| Releases | `GET /app-versions`, `POST /app-versions`, `PATCH /app-versions/:id`, `POST /app-versions/:id/delete` |
+| Other | `GET /ios-waitlist`, `GET /ios-waitlist/export`, `POST /ios-waitlist/:email/remove`, `GET /emails`, `POST /emails/:id/{retry,discard}`, `GET /audit`, `GET/POST /admins`, `POST /admins/:id/{enable,disable}` |
+
+### Sending email from the dashboard
+
+Code: `src/services/campaign.service.ts` (templates, audiences, sending) and
+`composedEmail` in `src/services/mail.service.ts` (the shared branded layout).
+
+- **Templates** (each with a subject and a formal body): promotion, new feature, account warning,
+  account suspension, security alert, Terms and Privacy update, scheduled maintenance,
+  subscription reminder, feedback request, "we miss you", iOS launch, and a blank message.
+- **Variables:** `{{name}}` and `{{email}}` are replaced for each recipient. A blank line starts
+  a new paragraph and lines starting with `- ` become bullets. Everything is HTML-escaped.
+- **Placeholders:** text in `[[double brackets]]` must be filled in. The API refuses to send a
+  draft that still contains one.
+- **Audiences:** one user, all users, verified, premium, the iOS waitlist (confirmed only) or
+  admins. Suspended users are excluded. One send is limited to 5,000 recipients.
+- **Delivery:** messages go through the normal `email_queue`, so they are retried like any other
+  email. With no SMTP settings they are only written to the log, and the dashboard warns you.
+- **Promotions:** there is no unsubscribe list yet. Only email people who agreed to promotions,
+  and honour requests to stop.
+
 ## Layout
 
 ```
-migrations/001_init.sql        whole schema, one database
+migrations/001_init.sql        whole schema, one database (later files add to it)
 src/
   server.ts                    startup, background jobs, graceful shutdown
   app.ts                       Express app: middleware order + routes
@@ -86,6 +235,7 @@ src/
     index.ts                   pg pool, transactions, advisory locks
     migrate.ts                 applies migrations/*.sql
   routes/                      URL -> controller wiring, one file per area
+                               (admin.routes.ts holds the whole admin API)
   controllers/                 read the request, call a service, return the result
   validators/                  zod request schemas (common.ts = shared rules)
   services/                    business logic and SQL
@@ -96,7 +246,11 @@ src/
     notification.service.ts    inbox, preferences, event handlers, push dispatcher
     subscription.service.ts    plans, entitlement, purchase + webhook handling
     store-verification.service.ts   Google Play and App Store verification
+    admin.service.ts           admin sign-in, dashboard reads (users, groups, expenses, ...)
+    admin-actions.service.ts   audited admin changes (suspend, delete, grant, plans, ...)
+    campaign.service.ts        admin email templates, audiences and sending
   middlewares/                 authenticate, idempotency, request-log, error-handler
+  scripts/                     app-version (releases), create-admin (npm run admin)
   events/                      transactional outbox, in-process dispatcher, event types
   utils/                       errors, http helpers, logger, tokens, money, split-calculator
   types/                       Express request typing
