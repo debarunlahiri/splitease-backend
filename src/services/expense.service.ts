@@ -315,9 +315,14 @@ export async function updateExpense(
 }
 
 /** Soft delete: the row stays for history and its balance changes are reversed. */
-export async function deleteExpense(db: Db, userId: string, expenseId: string): Promise<void> {
+export async function deleteExpense(
+    db: Db,
+    userId: string,
+    expenseId: string,
+    options: { skipEditorCheck?: boolean } = {},
+): Promise<void> {
     const existing = await lockedExpense(db, expenseId);
-    await requireEditor(db, userId, existing);
+    if (!options.skipEditorCheck) await requireEditor(db, userId, existing);
     const shares = asShares(await storedShares(db, [expenseId]));
     const now = new Date();
     const expense = (

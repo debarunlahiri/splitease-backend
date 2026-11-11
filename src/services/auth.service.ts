@@ -7,6 +7,7 @@ import { advisoryLock, Db, db, PG_UNIQUE_VIOLATION, pgErrorCode, tx } from '../d
 import {
     badCredentials,
     conflict,
+    forbidden,
     notFound,
     tooManyRequests,
     unavailable,
@@ -18,6 +19,8 @@ import { queueMailSafely, verificationEmail, welcomeEmail } from './mail.service
 
 const BCRYPT_ROUNDS = 12;
 
+const suspended = () => forbidden('This account has been suspended. Contact support for help.');
+
 interface UserRow {
     id: string;
     email: string;
@@ -26,6 +29,7 @@ interface UserRow {
     email_verified_at: Date | null;
     firebase_uid: string | null;
     photo_url: string | null;
+    disabled_at: Date | null;
 }
 
 export interface UserView {
@@ -284,6 +288,7 @@ export async function login(input: { email: string; password: string }): Promise
         throw badCredentials('Invalid email or password');
     }
     await recordSuccess(email);
+    if (user.disabled_at !== null) throw suspended();
     if (user.email_verified_at === null) {
         throw badCredentials('Email verification is required');
     }
@@ -317,6 +322,7 @@ export async function refresh(input: { refreshToken: string }): Promise<AuthResp
         );
         const user = await findById(conn, current.user_id);
         if (!user) throw badCredentials('Invalid refresh token');
+        if (user.disabled_at !== null) throw suspended();
         return authResponse(user, replacement);
     });
     if (response === null) throw badCredentials('Refresh token reuse detected');
@@ -484,6 +490,7 @@ export async function firebaseLogin(input: { idToken: string }): Promise<AuthRes
             ).rows[0] as UserRow;
             newAccount = true;
         }
+        if (user.disabled_at) throw suspended();
         user.photo_url = safePhotoUrl(token.picture);
         await conn.query('UPDATE users SET photo_url = $1 WHERE id = $2', [user.photo_url, user.id]);
         return authResponse(user, await issueRefreshToken(conn, user.id));

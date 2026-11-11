@@ -56,6 +56,11 @@ export const config = {
         secret: str('JWT_SECRET', 'replace-with-at-least-32-characters'),
         lifetimeMs: duration('JWT_LIFETIME', 'PT1H'),
     },
+    admin: {
+        // Admin tokens are signed with their own secret so they can never act as app users.
+        secret: str('ADMIN_JWT_SECRET', ''),
+        lifetimeMs: duration('ADMIN_JWT_LIFETIME', 'PT8H'),
+    },
     refreshTokenLifetimeMs: duration('REFRESH_TOKEN_LIFETIME', 'P30D'),
     emailVerification: {
         lifetimeMs: duration('EMAIL_VERIFICATION_LIFETIME', 'PT24H'),
@@ -129,6 +134,9 @@ export const config = {
 export function validateConfig(): void {
     if (Buffer.byteLength(config.jwt.secret, 'utf8') < 32) {
         throw new Error('JWT_SECRET must be at least 32 characters');
+    }
+    if (config.admin.secret && Buffer.byteLength(config.admin.secret, 'utf8') < 32) {
+        throw new Error('ADMIN_JWT_SECRET must be at least 32 characters');
     }
     if (config.google.enabled) {
         if (!config.google.pushAudience || !config.google.pushServiceAccountEmail) {

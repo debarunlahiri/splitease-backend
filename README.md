@@ -34,6 +34,31 @@ a new migration file is applied as soon as nodemon restarts. Applied files are r
 in `schema_migrations`; never edit one that has run, add a new numbered file instead
 (`002_add_something.sql`). `npm run migrate` applies them without starting the server. For production: `npm run build`, then `npm start`.
 
+## Production (AWS Lightsail, 24/7)
+
+Don't run `nodemon` in production: it is a dev tool and dies with your SSH
+session. Run the compiled build under PM2, which restarts it on crashes and
+after reboots.
+
+```bash
+sudo npm install -g pm2          # once
+npm ci && npm run build
+pm2 start npm --name splitease-backend -- start
+pm2 startup                      # run the sudo command it prints, once
+pm2 save
+```
+
+Useful commands:
+
+```bash
+pm2 status
+pm2 logs splitease-backend
+git pull && npm ci && npm run build && pm2 restart splitease-backend   # deploy
+```
+
+On small instances (512 MB / 1 GB) add a swap file, or the process can be
+killed for running out of memory.
+
 ## Browser access
 
 Set `APP_URL` in the backend environment to the comma-separated list of allowed

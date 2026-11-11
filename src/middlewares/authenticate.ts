@@ -8,6 +8,8 @@ const PUBLIC_PATHS = [
     // The app checks for updates before anyone is signed in.
     '/api/v1/app/',
     '/api/v1/ios-updates/',
+    // Admin routes are guarded by their own middleware and token type.
+    '/api/v1/admin/',
     '/api/v1/subscriptions/plans',
     '/api/v1/subscriptions/webhooks/',
 ];

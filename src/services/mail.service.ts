@@ -392,6 +392,80 @@ export function welcomeEmail(to: string, displayName: string): Mail {
     };
 }
 
+export interface ComposedMail {
+    to: string;
+    name: string;
+    subject: string;
+    heading: string;
+    /** Plain text: blank lines separate paragraphs, lines starting with "- " are bullets. */
+    body: string;
+    buttonLabel?: string | null;
+    buttonUrl?: string | null;
+    footer?: string | null;
+    preheader?: string | null;
+}
+
+/** Fills {{name}} / {{email}} in admin-written text. */
+function fillVariables(text: string, name: string, email: string): string {
+    return text.replace(/\{\{\s*name\s*\}\}/gi, name).replace(/\{\{\s*email\s*\}\}/gi, email);
+}
+
+function bodyToHtml(body: string): string {
+    const bullet = /^\s*[-•]\s+/;
+    const out: string[] = [];
+    for (const block of body.trim().split(/\n{2,}/)) {
+        // A block can mix a lead-in line with a list, so group consecutive lines by kind.
+        let text: string[] = [];
+        let items: string[] = [];
+        const flushText = () => {
+            if (text.length) out.push(`<p style="margin:0 0 16px">${text.map(escapeHtml).join('<br>')}</p>`);
+            text = [];
+        };
+        const flushItems = () => {
+            if (items.length) {
+                out.push(
+                    `<ul style="margin:0 0 16px;padding-left:22px">${items
+                        .map((item) => `<li style="margin:0 0 6px">${escapeHtml(item)}</li>`)
+                        .join('')}</ul>`,
+                );
+            }
+            items = [];
+        };
+        for (const line of block.split('\n').map((l) => l.trimEnd())) {
+            if (bullet.test(line)) {
+                flushText();
+                items.push(line.replace(bullet, ''));
+            } else {
+                flushItems();
+                text.push(line);
+            }
+        }
+        flushText();
+        flushItems();
+    }
+    return out.join('');
+}
+
+/** An email written by an admin, wrapped in the standard SplitEase shell. */
+export function composedEmail(input: ComposedMail): Mail {
+    const fill = (value: string) => fillVariables(value, input.name, input.to);
+    const body = fill(input.body);
+    const heading = fill(input.heading);
+    const url = input.buttonUrl && input.buttonLabel ? input.buttonUrl : null;
+    return {
+        to: input.to,
+        subject: fill(input.subject).replace(/[\r\n]+/g, ' ').trim(),
+        text: `${body.trim()}\n${url ? `\n${input.buttonLabel}: ${url}\n` : ''}`,
+        html: layout({
+            heading,
+            preheader: input.preheader ? fill(input.preheader) : undefined,
+            bodyHtml: bodyToHtml(body),
+            button: url ? { label: input.buttonLabel as string, url } : undefined,
+            footer: input.footer ? fill(input.footer) : undefined,
+        }),
+    };
+}
+
 export function friendInvitationEmail(to: string, inviter: string, url: string): Mail {
     const subject = `${inviter} invited you to connect on SplitEase`;
     const instructions = 'Open SplitEase and sign in with this email address to connect.';

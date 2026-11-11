@@ -13,6 +13,7 @@
     "start": "node --disable-warning=DEP0040 dist/server.js",
     "migrate": "tsx src/database/migrate.ts",
     "app-version": "tsx src/scripts/publish-app-version.ts",
+    "admin": "tsx src/scripts/create-admin.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

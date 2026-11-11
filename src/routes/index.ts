@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { inviteLandingPage } from '../controllers/landing.controller';
 import { health } from '../controllers/health.controller';
 import { brandLogoPath, brandLogoUrl } from '../utils/brand';
+import { adminRouter } from './admin.routes';
 import { appRouter } from './app.routes';
 import { authRouter } from './auth.routes';
 import { expensesRouter } from './expense.routes';
@@ -24,6 +25,7 @@ routes.get(brandLogoUrl, (_req, res, next) => {
     });
 });
 
+routes.use('/api/v1/admin', adminRouter);
 routes.use('/api/v1/app', appRouter);
 routes.use('/api/v1/auth', authRouter);
 routes.use('/api/v1/users', usersRouter);
