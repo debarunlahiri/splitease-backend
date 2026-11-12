@@ -201,6 +201,18 @@ async function writeNotification(
     }
 }
 
+/** A reminder for the payer: someone still owes them for this expense. */
+export function notifyExpenseReminder(
+    db: Db,
+    userId: string,
+    title: string,
+    message: string,
+    groupId: string,
+    expenseId: string,
+): Promise<void> {
+    return writeNotification(db, userId, 'EXPENSE_REMINDER', title, message, { groupId, expenseId });
+}
+
 // ------------------------------------------------------- invitation alerts
 
 async function deliverAlert(db: Db, alert: any, userId: string): Promise<void> {

@@ -1,12 +1,13 @@
 import Decimal from 'decimal.js';
 import { badRequest } from './errors';
 
-export type SplitType = 'EQUAL' | 'EXACT' | 'PERCENTAGE';
+export type SplitType = 'EQUAL' | 'EXACT' | 'PERCENTAGE' | 'SHARES';
 
 export interface RequestedShare {
     userId: string;
-    /** Ignored for EQUAL; the amount for EXACT; the percentage for PERCENTAGE. */
+    /** Ignored for EQUAL; the amount for EXACT; the percentage for PERCENTAGE; the number of shares for SHARES. */
     value?: Decimal | null;
+    payByDate?: string | null;
 }
 
 export interface Share {
@@ -28,6 +29,8 @@ export function calculateSplit(total: Decimal, type: SplitType, requested: Reque
             return exact(total, requested);
         case 'PERCENTAGE':
             return percentage(total, requested);
+        case 'SHARES':
+            return byShares(total, requested);
     }
 }
 
@@ -78,6 +81,30 @@ function percentage(total: Decimal, requested: RequestedShare[]): Share[] {
                       .times(percentages[index])
                       .div(ONE_HUNDRED)
                       .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+        assigned = assigned.plus(amount);
+        return { userId: share.userId, amount };
+    });
+}
+
+/** Splits in proportion to each person's number of shares; the last person receives the rounding leftover. */
+function byShares(total: Decimal, requested: RequestedShare[]): Share[] {
+    const units = values(requested);
+    if (units.some((unit) => unit.decimalPlaces() > 2)) {
+        throw badRequest('Share counts can have at most 2 decimal places');
+    }
+    const sum = units.reduce((left, right) => left.plus(right), new Decimal(0));
+    if (sum.lte(0)) {
+        throw badRequest('Share counts must add up to more than 0');
+    }
+    // Someone with 0 shares pays nothing, so the leftover goes to the last person who has shares.
+    const last = units.map((unit) => unit.gt(0)).lastIndexOf(true);
+    let assigned = new Decimal(0);
+    return requested.map((share, index) => {
+        // People after `last` have 0 shares, so they are never reached with leftover.
+        const amount =
+            index === last
+                ? total.minus(assigned)
+                : total.times(units[index]).div(sum).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
         assigned = assigned.plus(amount);
         return { userId: share.userId, amount };
     });

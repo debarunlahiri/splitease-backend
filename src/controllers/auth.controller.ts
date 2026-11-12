@@ -9,6 +9,7 @@ import {
     Register,
     ResendVerification,
     UpdateDisplayName,
+    UpdateUpiId,
     VerifyEmail,
 } from '../validators/auth.validator';
 import { parseBody } from '../validators/common';
@@ -28,3 +29,8 @@ export const me = (req: Request) => auth.me(currentUser(req).id);
 
 export const updateDisplayName = (req: Request, conn: Db) =>
     auth.updateDisplayName(conn, currentUser(req).id, parseBody(UpdateDisplayName, req.body).displayName);
+
+export const updateUpiId = (req: Request, conn: Db) =>
+    auth.updateUpiId(conn, currentUser(req).id, parseBody(UpdateUpiId, req.body).upiId);
+
+export const confirmUpiId = (req: Request, conn: Db) => auth.confirmUpiId(conn, currentUser(req).id);

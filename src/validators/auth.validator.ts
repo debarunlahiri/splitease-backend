@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { checkUpiId } from '../utils/upi';
 import { email, notBlank } from './common';
 
 export const Register = z.object({
@@ -24,4 +25,20 @@ export const UpdateDisplayName = z.object({
         (value) => !/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/.test(value),
         'must be a single line without control characters',
     ),
+});
+
+/** A UPI ID such as name@bank. An empty value or null removes it. */
+export const UpdateUpiId = z.object({
+    upiId: z
+        .string()
+        .nullable()
+        .transform((value, ctx) => {
+            if (value === null || value.trim() === '') return null;
+            const check = checkUpiId(value);
+            if (!check.valid) {
+                ctx.addIssue({ code: z.ZodIssueCode.custom, message: check.reason ?? 'is not a valid UPI ID' });
+                return z.NEVER;
+            }
+            return check.upiId as string;
+        }),
 });

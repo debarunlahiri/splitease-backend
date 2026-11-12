@@ -70,6 +70,8 @@ async function deliver(mail: Mail): Promise<void> {
  * the verification code), so local development works.
  */
 export async function queueMail(conn: Db, mail: Mail, kind: string): Promise<void> {
+    // Contacts added to a group before joining have no real address to write to.
+    if (mail.to.endsWith('@placeholder.invalid')) return;
     if (!mailEnabled()) {
         logger.info(`Email not sent (SMTP is not configured) to ${mail.to}: ${mail.subject}\n${mail.text}`);
         return;

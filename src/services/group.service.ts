@@ -22,6 +22,10 @@ export interface MemberView {
     joinedAt: Date;
     displayName: string | null;
     photoUrl: string | null;
+    /** Added from contacts and not on SplitEase yet. */
+    pending?: boolean;
+    upiId?: string | null;
+    upiVerified?: boolean;
 }
 
 export interface GroupView {
@@ -96,6 +100,101 @@ async function addMember(db: Db, groupId: string, userId: string, role: string):
     return result.rowCount === 1;
 }
 
+/**
+ * Adds a person from the caller's contacts to the group so they can be part of splits right away.
+ * They have no login; when they later accept an email invitation, their splits move to their account.
+ */
+export async function addContactMember(
+    db: Db,
+    userId: string,
+    groupId: string,
+    input: { name: string; email?: string | null; phone?: string | null },
+): Promise<MemberView> {
+    await requireMember(db, groupId, userId);
+    const email = input.email ? input.email.trim().toLowerCase() : null;
+    const phone = input.phone ? input.phone.replace(/[^\d+]/g, '') || null : null;
+    const existing = (
+        await db.query(
+            `SELECT u.id FROM users u JOIN group_members m ON m.user_id = u.id
+             WHERE m.group_id = $1 AND u.is_contact
+               AND (($2::text IS NOT NULL AND lower(u.contact_email) = $2)
+                 OR ($3::text IS NOT NULL AND u.contact_phone = $3))`,
+            [groupId, email, phone],
+        )
+    ).rows[0];
+    let contactId: string = existing?.id;
+    if (!contactId) {
+        contactId = randomUUID();
+        await db.query(
+            `INSERT INTO users (id, email, display_name, password_hash, created_at,
+                                is_contact, contact_email, contact_phone, added_by)
+             VALUES ($1, $2, $3, '!', $4, TRUE, $5, $6, $7)`,
+            [
+                contactId,
+                `contact-${contactId}@placeholder.invalid`,
+                input.name.trim().slice(0, 100),
+                new Date(),
+                email,
+                phone,
+                userId,
+            ],
+        );
+        await addMember(db, groupId, contactId, 'CONTACT');
+    }
+    const member = (
+        await db.query(
+            `SELECT m.user_id, m.role, m.joined_at, u.display_name, u.photo_url
+             FROM group_members m JOIN users u ON u.id = m.user_id
+             WHERE m.group_id = $1 AND m.user_id = $2`,
+            [groupId, contactId],
+        )
+    ).rows[0];
+    return {
+        userId: member.user_id,
+        role: member.role,
+        joinedAt: member.joined_at,
+        displayName: member.display_name,
+        photoUrl: member.photo_url ?? null,
+        pending: true,
+    };
+}
+
+/** Moves a contact's splits onto the real account of the same email when that person joins. */
+async function claimContactMembers(db: Db, groupId: string, realUserId: string, email: string): Promise<void> {
+    const contacts = (
+        await db.query(
+            `SELECT u.id FROM users u JOIN group_members m ON m.user_id = u.id
+             WHERE m.group_id = $1 AND u.is_contact AND lower(u.contact_email) = lower($2)`,
+            [groupId, email],
+        )
+    ).rows;
+    for (const { id } of contacts) {
+        await db.query(
+            `UPDATE expense_shares SET user_id = $1
+             WHERE user_id = $2 AND expense_id IN (SELECT id FROM expenses WHERE group_id = $3)
+               AND NOT EXISTS (SELECT 1 FROM expense_shares x WHERE x.expense_id = expense_shares.expense_id AND x.user_id = $1)`,
+            [realUserId, id, groupId],
+        );
+        // Open payment claims made through a pay link follow the person to their new account.
+        await db.query('UPDATE expense_payment_claims SET user_id = $1 WHERE user_id = $2 AND group_id = $3', [realUserId, id, groupId]);
+        await db.query('UPDATE settlements SET payer_id = $1 WHERE payer_id = $2 AND group_id = $3', [realUserId, id, groupId]);
+        await db.query('UPDATE settlements SET payee_id = $1 WHERE payee_id = $2 AND group_id = $3', [realUserId, id, groupId]);
+        await db.query(
+            `INSERT INTO group_balances (id, group_id, user_id, currency, amount, updated_at)
+             SELECT gen_random_uuid(), group_id, $1, currency, amount, now() FROM group_balances
+             WHERE group_id = $3 AND user_id = $2
+             ON CONFLICT (group_id, user_id, currency)
+             DO UPDATE SET amount = group_balances.amount + EXCLUDED.amount, updated_at = now()`,
+            [realUserId, id, groupId],
+        );
+        await db.query('DELETE FROM group_balances WHERE group_id = $1 AND user_id = $2', [groupId, id]);
+        await db.query('DELETE FROM group_members WHERE group_id = $1 AND user_id = $2', [groupId, id]);
+        // The placeholder account goes away once nothing refers to it any more.
+        const left = (await db.query('SELECT 1 FROM group_members WHERE user_id = $1 LIMIT 1', [id])).rowCount;
+        if (!left) await db.query('DELETE FROM users WHERE id = $1 AND is_contact', [id]);
+    }
+}
+
 async function addInvitedMember(
     db: Db,
     group: GroupRow,
@@ -121,7 +220,7 @@ async function groupViews(db: Db, groups: GroupRow[]): Promise<GroupView[]> {
     if (groups.length === 0) return [];
     const members = (
         await db.query(
-            `SELECT m.group_id, m.user_id, m.role, m.joined_at, u.display_name, u.photo_url
+            `SELECT m.group_id, m.user_id, m.role, m.joined_at, u.display_name, u.photo_url, u.is_contact, u.upi_id, u.upi_verified_at
              FROM group_members m LEFT JOIN users u ON u.id = m.user_id
              WHERE m.group_id = ANY($1::uuid[])
              ORDER BY m.joined_at ASC, m.id ASC`,
@@ -142,6 +241,11 @@ async function groupViews(db: Db, groups: GroupRow[]): Promise<GroupView[]> {
                 joinedAt: member.joined_at,
                 displayName: member.display_name ?? null,
                 photoUrl: member.photo_url ?? null,
+                /** Added from contacts and not on SplitEase yet. */
+                pending: Boolean(member.is_contact),
+                /** UPI ID for paying this person back (INR). */
+                upiId: member.upi_id ?? null,
+                upiVerified: Boolean(member.upi_id && member.upi_verified_at),
             })),
     }));
 }
@@ -456,6 +560,7 @@ export async function acceptInvitation(
     }
     const group = await requiredGroup(db, invitation.group_id);
     await addInvitedMember(db, group, userId, invitation.invited_by);
+    await claimContactMembers(db, invitation.group_id, userId, email);
     return respond(db, invitationId, 'ACCEPTED', userId);
 }
 

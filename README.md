@@ -291,7 +291,7 @@ recipient must also enable push in the app and grant Android notification permis
 
 - JSON money values are still numbers. Amounts with more than two decimal places are
   now rejected with 400 instead of being silently rounded by the database.
-- `currency` / `defaultCurrency` and share values for EXACT and PERCENTAGE splits are
+- `currency` / `defaultCurrency` and share values for EXACT, PERCENTAGE and SHARES splits are
   required (the Java service answered 500 when they were missing).
 - Access tokens are signed with HS256. Tokens issued by the Java service with the same
   `JWT_SECRET` are still accepted.
@@ -377,3 +377,84 @@ npm run app-version -- --unpublish 2
 `--min` is the lowest installed version code allowed to keep using the app; older versions are
 forced to update. You can also edit the table directly with SQL. The APK itself is hosted
 elsewhere, for example the website's `public/downloads/`.
+
+## Expense extras (free for everyone for now)
+
+- `splitType` also accepts `SHARES` (split by ratio; `value` is each person's share count).
+- Expenses take optional `remindAfterDays` (2, 3 or 7) and `payByDate`. A background job notifies
+  the payer once an expense has been open that long and the group still owes them money.
+- Every share in a response has `amount`, `paidAmount` and `status` (`UNPAID`, `PARTIAL`, `PAID`).
+- `POST /api/v1/expenses/:id/payments` `{ userId, amount? }` – the payer marks a person's share as
+  paid (all of what is left when `amount` is omitted) and a settlement is recorded.
+- `POST /api/v1/expenses/:id/notify` `{ userIds?, channels: ["PUSH","EMAIL"], message? }` – the payer
+  nudges people who still owe them, in the app and/or by email.
+- `GET /api/v1/expense-templates/group/:groupId`, `POST /api/v1/expense-templates`,
+  `DELETE /api/v1/expense-templates/:id` – saved expense templates per user and group.
+- Migrations `010_expense_extras.sql` and `011_expense_share_payments.sql` add the new columns/tables.
+
+## Ledger
+
+- `GET /api/v1/ledger` – what others still owe you on expenses you paid (per person, per currency, with
+  the splits behind it), plus what arrived this month.
+- `GET /api/v1/ledger/export.csv` – the same data as a CSV file (free for everyone for now).
+- `POST /api/v1/ledger/remind` `{ userId, channels }` – one reminder covering everything a person owes you.
+
+## Contacts as group members
+
+- `POST /api/v1/groups/:groupId/contacts` `{ name, email?, phone? }` adds someone from the phone's
+  contacts to the group so they can be part of splits before they have an account. Members expose
+  `pending: true` until then. When that person accepts an email invitation for the same address,
+  their splits and balances move to their account. Joining through an invite link can't be matched
+  automatically (there is no email), so those contacts stay as they are.
+- Migration `012_contact_members.sql` adds the contact columns to `users`. Contacts are never emailed
+  (`@placeholder.invalid`) and cannot sign in.
+
+- `GET /api/v1/groups/progress` – settle-up progress per group (`settled`/`total`, pending and collected per
+  currency) plus `toCollect` / `toPay` across all groups; used for the Groups screen summary.
+
+## UPI
+
+- `PUT /api/v1/users/me/upi` `{ upiId }` sets (or clears with `null`/empty) the caller's UPI ID. `GET /users/me` returns
+  `upiId`, and group members expose `upiId` so friends can pay in INR. Migration `013_upi_id.sql`.
+- `GET /api/v1/app/links` returns `{ webUrl }`, the public website address (used for shareable pay links).
+- `GET /ledger/export.csv` now has three sections: a money summary per currency (shared, paid back, pending, received), who owes you (share / paid / pending per person), and every payment you received.
+
+## Short pay links
+
+- `POST /api/v1/pay-links` `{ v, d, c, n, u?, t:[{n,a}], b? }` stores a split and returns `{ code, url }` where `url` is
+  `<site>/p/<code>` (10 random characters, valid 90 days). The details stay on the server instead of in the URL.
+- `GET /api/v1/public/pay/:code` (no sign-in) returns the stored split for the website. Migration `014_pay_links.sql`.
+
+## Payment claims ("I've paid" and confirm)
+
+- `POST /api/v1/expenses/:id/claims` `{ amount? }` – a signed-up person says they paid their share (all that is left when
+  `amount` is omitted). The payer gets a notification. One open claim per person per expense.
+- `GET /api/v1/expenses/group/:groupId/claims` – open claims in a group (those waiting on you as the payer and your own).
+- `POST /api/v1/expenses/claims/:claimId/confirm` – the payer confirms the money arrived; the payment is recorded.
+- `POST /api/v1/expenses/claims/:claimId/reject` – the payer says it hasn't arrived; the person is told.
+- Migration `015_payment_claims.sql`.
+
+## Per-person due dates
+
+- Each share in a request may carry `payByDate`; responses return `dueDate` (their own date, else the expense's) per share.
+  Migration `016_share_due_dates.sql`.
+- `GET /ledger` also returns `youOwe` (what you owe each person, with their UPI ID, due dates and `overdue`) and `stillToPay`;
+  the splits in `people` now carry `dueDate` and `overdue`. Pay links accept a per-person `d` due date.
+
+## UPI ID checks
+
+- `PUT /users/me/upi` now checks the shape of the UPI ID (one `@`, 3+ characters before it, only valid characters, a handle
+  like `ybl` or `oksbi` after it, not an email address) and answers 400 with a reason. `GET /users/me` returns `upiVerified`
+  and `upiHandleKnown`; members expose `upiVerified`. Changing the ID resets verification. Migration `017_upi_verified.sql`.
+- `POST /users/me/upi/confirm` records that the owner saw their own name in a UPI app for this ID. This is a self-confirmation:
+  checking with the bank would need a payment gateway's "validate VPA" API and its credentials.
+- `GET /ledger/export.xlsx` – the same ledger as a formatted Excel workbook (Summary, Who owes you, Payments received): coloured headers, currency formats, colour-coded status and overdue dates, frozen header row and filters.
+- Ledger exports take `?scope=all|owed|owe` (default `all`): `owed` = what others owe you, `owe` = what you owe. File names are unique, e.g. `splitease-ledger-owed-to-you-20261112-203015.xlsx`.
+- `GET /api/v1/public/pay/:code/invoice/:index` (no sign-in) returns an invoice/receipt for one person on a pay link (number, date, items, paid, balance) once something has been paid.
+
+## Invoices
+
+- Invoices are stored records with their own number (`SE-2026-000123`, from a database sequence). The first time an invoice is
+  made for a person it gets its number and keeps it; later payments update the amounts and status. Migration `018_invoices.sql`.
+- `GET /api/v1/invoices?q=` lists invoices you issued or were billed on, newest first; `q` matches the number, a name, the group or an item.
+  Admins can search all of them at `GET /api/v1/admin/invoices?q=`.

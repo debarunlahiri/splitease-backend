@@ -1,3 +1,4 @@
+import { checkUpiId } from '../utils/upi';
 import { randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { getAuth } from 'firebase-admin/auth';
@@ -6,6 +7,7 @@ import { config } from '../config';
 import { advisoryLock, Db, db, PG_UNIQUE_VIOLATION, pgErrorCode, tx } from '../database';
 import {
     badCredentials,
+    badRequest,
     conflict,
     forbidden,
     notFound,
@@ -29,6 +31,8 @@ interface UserRow {
     email_verified_at: Date | null;
     firebase_uid: string | null;
     photo_url: string | null;
+    upi_id?: string | null;
+    upi_verified_at?: Date | null;
     disabled_at: Date | null;
 }
 
@@ -37,6 +41,12 @@ export interface UserView {
     email: string;
     displayName: string;
     photoUrl: string | null;
+    /** UPI ID friends can pay (INR). */
+    upiId: string | null;
+    /** The owner confirmed in their UPI app that the name shown for this UPI ID is theirs. */
+    upiVerified: boolean;
+    /** The part after @ is not a handle we know; worth double-checking. */
+    upiHandleKnown: boolean;
 }
 
 export interface AuthResponse {
@@ -59,6 +69,9 @@ function userView(user: UserRow): UserView {
         email: user.email,
         displayName: user.display_name,
         photoUrl: user.photo_url,
+        upiId: user.upi_id ?? null,
+        upiVerified: Boolean(user.upi_id && user.upi_verified_at),
+        upiHandleKnown: user.upi_id ? checkUpiId(user.upi_id).unknownHandle !== true : true,
     };
 }
 
@@ -392,6 +405,29 @@ export async function updateDisplayName(conn: Db, userId: string, name: string):
         [name, userId],
     );
     if (!rows[0]) throw notFound('User not found');
+    return userView(rows[0]);
+}
+
+export async function updateUpiId(conn: Db, userId: string, upiId: string | null): Promise<UserView> {
+    // A new UPI ID starts unverified.
+    const { rows } = await conn.query(
+        'UPDATE users SET upi_id = $1, upi_verified_at = CASE WHEN upi_id IS NOT DISTINCT FROM $1 THEN upi_verified_at ELSE NULL END WHERE id = $2 RETURNING *',
+        [upiId, userId],
+    );
+    if (!rows[0]) throw notFound('User not found');
+    return userView(rows[0]);
+}
+
+/**
+ * The owner says the name their UPI app showed for this UPI ID is theirs. This is a self-confirmation,
+ * not a check with the bank: it proves the ID reaches the person it should, because they saw the name.
+ */
+export async function confirmUpiId(conn: Db, userId: string): Promise<UserView> {
+    const { rows } = await conn.query(
+        'UPDATE users SET upi_verified_at = now() WHERE id = $1 AND upi_id IS NOT NULL RETURNING *',
+        [userId],
+    );
+    if (!rows[0]) throw badRequest('Add a UPI ID first');
     return userView(rows[0]);
 }
 

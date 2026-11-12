@@ -3,7 +3,7 @@ import { db, Db, tx } from '../database';
 import * as groups from '../services/group.service';
 import { currentUser, pageRequest, uuidParam } from '../utils/http';
 import { parseBody } from '../validators/common';
-import { CreateGroup, Invite, InviteFriends, JoinLink } from '../validators/group.validator';
+import { AddContactMember, CreateGroup, Invite, InviteFriends, JoinLink } from '../validators/group.validator';
 
 // Handlers taking (req, conn) are idempotent writes and already run in a transaction.
 
@@ -75,3 +75,11 @@ export const joinInviteLink = (req: Request) => {
     const { token } = parseBody(JoinLink, req.body);
     return tx((conn) => groups.joinByInviteLink(conn, userId, token));
 };
+
+export const addContact = (req: Request, conn: Db) =>
+    groups.addContactMember(
+        conn,
+        currentUser(req).id,
+        uuidParam(req, 'groupId'),
+        parseBody(AddContactMember, req.body),
+    );

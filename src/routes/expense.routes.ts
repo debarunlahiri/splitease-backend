@@ -37,5 +37,11 @@ expensesRouter.get('/attachments/:attachmentId', asyncHandler(async (req, res) =
 }));
 expensesRouter.get('/group/:groupId', route(200, expenses.byGroup));
 expensesRouter.put('/:expenseId', idempotent(200, expenses.update));
+expensesRouter.get('/group/:groupId/claims', route(200, expenses.pendingClaims));
+expensesRouter.post('/claims/:claimId/confirm', idempotent(200, expenses.confirmClaim));
+expensesRouter.post('/claims/:claimId/reject', idempotent(200, expenses.rejectClaim));
+expensesRouter.post('/:expenseId/claims', idempotent(201, expenses.createClaim));
+expensesRouter.post('/:expenseId/payments', idempotent(200, expenses.recordPayment));
+expensesRouter.post('/:expenseId/notify', idempotent(200, expenses.nudge));
 expensesRouter.delete('/:expenseId', idempotent(204, expenses.remove));
 expensesRouter.get('/:expenseId/history', route(200, expenses.history));

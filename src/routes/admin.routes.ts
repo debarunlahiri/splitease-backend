@@ -358,6 +358,26 @@ adminRouter.post(
     '/expenses/:id/delete',
     route(204, async (req) => actions.adminDeleteExpense(actor(req), uuidParam(req, 'id'))),
 );
+adminRouter.get(
+    '/claims',
+    route(200, async (req) => admin.listClaims(pageRequest(req), queryText(req, 'status'))),
+);
+adminRouter.get(
+    '/invoices',
+    route(200, async (req) => admin.listInvoices(pageRequest(req), queryText(req, 'q'))),
+);
+adminRouter.get(
+    '/pay-links',
+    route(200, async (req) => admin.listPayLinks(pageRequest(req), queryText(req, 'state'))),
+);
+adminRouter.post(
+    '/pay-links/:id/revoke',
+    route(204, async (req) => {
+        const code = String(req.params.id);
+        if (!/^[A-Za-z0-9]{8,16}$/.test(code)) throw badRequest('Invalid link');
+        await actions.revokePayLink(actor(req), code);
+    }),
+);
 adminRouter.post(
     '/attachments/:id/remove',
     route(204, async (req) => actions.removeAttachment(actor(req), uuidParam(req, 'id'))),

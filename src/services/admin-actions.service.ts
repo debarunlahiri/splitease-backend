@@ -499,3 +499,12 @@ export async function removeAttachment(actor: Actor, id: string): Promise<void> 
     if (!row) throw notFound('Attachment not found');
     await audit(actor, 'attachment.remove', 'expense', row.expense_id, { name: row.name });
 }
+
+/** Switches a pay link off right away (for example if it was shared by mistake). */
+export async function revokePayLink(actor: Actor, code: string): Promise<void> {
+    const row = (
+        await db.query('DELETE FROM pay_links WHERE code = $1 RETURNING created_by', [code])
+    ).rows[0];
+    if (!row) throw notFound('Pay link not found');
+    await audit(actor, 'paylink.revoke', 'user', row.created_by, { prefix: code.slice(0, 3) });
+}

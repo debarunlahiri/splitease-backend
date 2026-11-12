@@ -16,6 +16,7 @@ import {
     stopMailDispatcher,
     verifyMailConnection,
 } from './services/mail.service';
+import { startReminderDispatcher, stopReminderDispatcher } from './services/expense-reminder.service';
 import { registerBalanceProjection } from './services/settlement.service';
 
 async function main(): Promise<void> {
@@ -32,6 +33,7 @@ async function main(): Promise<void> {
     startOutboxDispatcher();
     startPushDispatcher();
     startMailDispatcher();
+    startReminderDispatcher();
     void verifyMailConnection();
 
     const server = createApp().listen(config.port, () => {
@@ -53,6 +55,7 @@ async function main(): Promise<void> {
         stopOutboxDispatcher();
         stopPushDispatcher();
         stopMailDispatcher();
+        stopReminderDispatcher();
         server.close(() => {
             pool.end().finally(() => process.exit(0));
         });

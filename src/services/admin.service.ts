@@ -1,3 +1,4 @@
+import { describeChanges, parseSnapshot, snapshotUserIds, summarize } from './expense-history';
 import { randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -139,7 +140,17 @@ export async function overview() {
             (SELECT COUNT(*) FROM subscriptions WHERE status = 'ACTIVE' AND expires_at > now()) AS active_subscriptions,
             (SELECT COUNT(*) FROM ios_update_subscriptions) AS ios_waitlist,
             (SELECT COUNT(*) FROM email_queue WHERE sent_at IS NULL AND failed_at IS NULL) AS emails_pending,
-            (SELECT COUNT(*) FROM email_queue WHERE failed_at IS NOT NULL) AS emails_failed
+            (SELECT COUNT(*) FROM email_queue WHERE failed_at IS NOT NULL) AS emails_failed,
+            (SELECT COUNT(*) FROM expense_payment_claims WHERE status = 'PENDING') AS claims_pending,
+            (SELECT COUNT(*) FROM expense_payment_claims WHERE status = 'REJECTED' AND created_at > now() - interval '30 days') AS claims_rejected_30d,
+            (SELECT COUNT(*) FROM pay_links WHERE expires_at > now()) AS pay_links_active,
+            (SELECT COUNT(*) FROM users WHERE upi_id IS NOT NULL) AS users_with_upi,
+            (SELECT COUNT(*) FROM users WHERE upi_verified_at IS NOT NULL AND upi_id IS NOT NULL) AS users_upi_verified,
+            (SELECT COUNT(*) FROM users WHERE is_contact) AS contact_members,
+            (SELECT COUNT(*) FROM expense_templates) AS templates,
+            (SELECT COUNT(*) FROM expense_shares s JOIN expenses e ON e.id = s.expense_id
+                WHERE e.deleted_at IS NULL AND s.user_id <> e.paid_by AND s.amount > s.paid_amount
+                  AND COALESCE(s.pay_by_date, e.pay_by_date) < current_date) AS overdue_shares
     `)
     ).rows[0];
 
@@ -157,6 +168,15 @@ export async function overview() {
         SELECT currency, COUNT(*) AS count, SUM(amount) AS total
         FROM expenses WHERE deleted_at IS NULL
         GROUP BY currency ORDER BY COUNT(*) DESC LIMIT 6
+    `)
+    ).rows;
+
+    const outstanding = (
+        await db.query(`
+        SELECT e.currency, SUM(s.amount - s.paid_amount) AS pending, SUM(s.paid_amount) FILTER (WHERE s.user_id <> e.paid_by) AS collected
+        FROM expense_shares s JOIN expenses e ON e.id = s.expense_id
+        WHERE e.deleted_at IS NULL AND s.user_id <> e.paid_by
+        GROUP BY e.currency ORDER BY SUM(s.amount) DESC LIMIT 6
     `)
     ).rows;
 
@@ -181,6 +201,14 @@ export async function overview() {
             iosWaitlist: num(counts.ios_waitlist),
             emailsPending: num(counts.emails_pending),
             emailsFailed: num(counts.emails_failed),
+            claimsPending: num(counts.claims_pending),
+            claimsRejected30d: num(counts.claims_rejected_30d),
+            payLinksActive: num(counts.pay_links_active),
+            usersWithUpi: num(counts.users_with_upi),
+            usersUpiVerified: num(counts.users_upi_verified),
+            contactMembers: num(counts.contact_members),
+            templates: num(counts.templates),
+            overdueShares: num(counts.overdue_shares),
         },
         signups: signups.map((r) => ({ day: r.day, count: num(r.count) })),
         expenseVolume: expenseVolume.map((r) => ({
@@ -188,6 +216,7 @@ export async function overview() {
             count: num(r.count),
             total: r.total,
         })),
+        outstanding: outstanding.map((r) => ({ currency: r.currency, pending: r.pending, collected: r.collected ?? '0' })),
         subscriptionRevenue: revenue.map((r) => ({
             currency: r.currency,
             total: r.total,
@@ -206,7 +235,7 @@ function like(q: string | undefined): string | null {
 
 export async function listUsers(page: PageRequest, q: string | undefined, verified?: string) {
     const pattern = like(q);
-    const where = `WHERE ($1::text IS NULL OR u.email ILIKE $1 OR u.display_name ILIKE $1)
+    const where = `WHERE ($1::text IS NULL OR u.email ILIKE $1 OR u.display_name ILIKE $1 OR u.upi_id ILIKE $1 OR u.contact_email ILIKE $1 OR u.contact_phone ILIKE $1)
                    AND ($2::text IS NULL OR ($2 = 'yes') = (u.email_verified_at IS NOT NULL))`;
     const flag = verified === 'yes' || verified === 'no' ? verified : null;
     const total = num(
@@ -217,6 +246,7 @@ export async function listUsers(page: PageRequest, q: string | undefined, verifi
             `SELECT u.id, u.email, u.display_name, u.created_at, u.email_verified_at,
                     (u.firebase_uid IS NOT NULL) AS google,
                     (u.disabled_at IS NOT NULL) AS suspended,
+                    u.is_contact, u.upi_id, (u.upi_verified_at IS NOT NULL) AS upi_verified,
                     (SELECT COUNT(*) FROM group_members m WHERE m.user_id = u.id) AS groups,
                     EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = u.id
                             AND s.status = 'ACTIVE' AND s.expires_at > now()) AS premium
@@ -228,7 +258,11 @@ export async function listUsers(page: PageRequest, q: string | undefined, verifi
     return pageResponse(
         rows.map((r) => ({
             id: r.id,
-            email: r.email,
+            // People added from a phone's contacts have no real address of their own.
+            email: r.is_contact ? null : r.email,
+            isContact: r.is_contact,
+            upiId: r.upi_id,
+            upiVerified: r.upi_id ? r.upi_verified : false,
             displayName: r.display_name,
             createdAt: r.created_at,
             emailVerified: r.email_verified_at !== null,
@@ -266,14 +300,30 @@ export async function userDetail(id: string) {
             `SELECT
                 (SELECT COUNT(*) FROM expenses WHERE paid_by = $1 AND deleted_at IS NULL) AS expenses_paid,
                 (SELECT COUNT(*) FROM friendships WHERE first_user_id = $1 OR second_user_id = $1) AS friends,
+                (SELECT COUNT(*) FROM expense_payment_claims WHERE user_id = $1) AS claims_made,
+                (SELECT COUNT(*) FROM expense_payment_claims c JOIN expenses e ON e.id = c.expense_id WHERE e.paid_by = $1) AS claims_received,
+                (SELECT COUNT(*) FROM expense_templates WHERE user_id = $1) AS templates,
                 (SELECT COUNT(*) FROM refresh_tokens WHERE user_id = $1
                     AND revoked_at IS NULL AND consumed_at IS NULL AND expires_at > now()) AS sessions`,
             [id],
         )
     ).rows[0];
+    // Money owed to and by this person, per currency (currencies are never added together).
+    const balances = (
+        await db.query(
+            `SELECT e.currency,
+                    COALESCE(SUM(s.amount - s.paid_amount) FILTER (WHERE e.paid_by = $1 AND s.user_id <> $1), 0) AS owed,
+                    COALESCE(SUM(s.amount - s.paid_amount) FILTER (WHERE s.user_id = $1 AND e.paid_by <> $1), 0) AS owes
+             FROM expense_shares s JOIN expenses e ON e.id = s.expense_id
+             WHERE e.deleted_at IS NULL AND (e.paid_by = $1 OR s.user_id = $1)
+             GROUP BY e.currency ORDER BY e.currency`,
+            [id],
+        )
+    ).rows;
     return {
         id: user.id,
-        email: user.email,
+        // Contacts added from a phone have no real address: show what the person who added them saved.
+        email: user.is_contact ? (user.contact_email ?? '') : user.email,
         displayName: user.display_name,
         photoUrl: user.photo_url,
         createdAt: user.created_at,
@@ -281,6 +331,16 @@ export async function userDetail(id: string) {
         disabledAt: user.disabled_at,
         disabledReason: user.disabled_reason,
         google: user.firebase_uid !== null,
+        upiId: user.upi_id,
+        upiVerifiedAt: user.upi_id ? user.upi_verified_at : null,
+        isContact: user.is_contact,
+        contact: user.is_contact
+            ? { email: user.contact_email, phone: user.contact_phone, addedBy: user.added_by }
+            : null,
+        claimsMade: num(stats.claims_made),
+        claimsReceived: num(stats.claims_received),
+        templates: num(stats.templates),
+        balances: balances.map((b) => ({ currency: b.currency, owed: b.owed, owes: b.owes })),
         expensesPaid: num(stats.expenses_paid),
         friends: num(stats.friends),
         activeSessions: num(stats.sessions),
@@ -362,7 +422,7 @@ export async function groupDetail(id: string) {
     if (!group) throw notFound('Group not found');
     const members = (
         await db.query(
-            `SELECT u.id, u.display_name, u.email, m.role, m.joined_at
+            `SELECT u.id, u.display_name, u.email, m.role, m.joined_at, u.is_contact, u.upi_id, u.contact_phone
              FROM group_members m JOIN users u ON u.id = m.user_id
              WHERE m.group_id = $1 ORDER BY m.joined_at`,
             [id],
@@ -388,6 +448,18 @@ export async function groupDetail(id: string) {
     const settlements = num(
         (await db.query('SELECT COUNT(*) AS n FROM settlements WHERE group_id = $1', [id])).rows[0].n,
     );
+    const progress = (
+        await db.query(
+            `SELECT e.currency,
+                    COUNT(*) FILTER (WHERE s.user_id <> e.paid_by) AS people,
+                    COUNT(*) FILTER (WHERE s.user_id <> e.paid_by AND s.paid_amount >= s.amount) AS settled,
+                    COALESCE(SUM(s.amount - s.paid_amount) FILTER (WHERE s.user_id <> e.paid_by), 0) AS pending,
+                    COALESCE(SUM(s.paid_amount) FILTER (WHERE s.user_id <> e.paid_by), 0) AS collected
+             FROM expense_shares s JOIN expenses e ON e.id = s.expense_id
+             WHERE e.group_id = $1 AND e.deleted_at IS NULL GROUP BY e.currency`,
+            [id],
+        )
+    ).rows;
     return {
         id: group.id,
         name: group.name,
@@ -397,9 +469,19 @@ export async function groupDetail(id: string) {
         members: members.map((m) => ({
             id: m.id,
             displayName: m.display_name,
-            email: m.email,
+            email: m.is_contact ? null : m.email,
+            isContact: m.is_contact,
+            phone: m.is_contact ? m.contact_phone : null,
+            upiId: m.upi_id,
             role: m.role,
             joinedAt: m.joined_at,
+        })),
+        progress: progress.map((p) => ({
+            currency: p.currency,
+            people: num(p.people),
+            settled: num(p.settled),
+            pending: p.pending,
+            collected: p.collected,
         })),
         totals: totals.map((t) => ({ currency: t.currency, count: num(t.count), total: t.total })),
         recentExpenses: expenses.map((e) => ({
@@ -684,7 +766,7 @@ export async function expenseDetail(id: string) {
     if (!e) throw notFound('Expense not found');
     const shares = (
         await db.query(
-            `SELECT s.user_id, s.amount, u.display_name, u.email
+            `SELECT s.user_id, s.amount, s.paid_amount, s.pay_by_date, u.display_name, u.email, u.is_contact, u.upi_id
              FROM expense_shares s LEFT JOIN users u ON u.id = s.user_id
              WHERE s.expense_id = $1 ORDER BY u.display_name`,
             [id],
@@ -699,12 +781,42 @@ export async function expenseDetail(id: string) {
     ).rows;
     const history = (
         await db.query(
-            `SELECT a.action, a.revision, a.occurred_at, u.display_name AS actor
+            `SELECT a.action, a.revision, a.occurred_at, a.snapshot, a.actor_id, u.display_name AS actor
              FROM expense_audit a LEFT JOIN users u ON u.id = a.actor_id
              WHERE a.expense_id = $1 ORDER BY a.revision`,
             [id],
         )
     ).rows;
+    const claims = (
+        await db.query(
+            `SELECT c.id, c.amount, c.status, c.created_at, c.resolved_at, u.display_name, c.user_id
+             FROM expense_payment_claims c LEFT JOIN users u ON u.id = c.user_id
+             WHERE c.expense_id = $1 ORDER BY c.created_at DESC`,
+            [id],
+        )
+    ).rows;
+    // Names for the change descriptions.
+    const ids = new Set<string>([e.paid_by]);
+    for (const h of history) {
+        snapshotUserIds(h.snapshot).forEach((u) => ids.add(u));
+    }
+    const names = new Map<string, string>(
+        (await db.query('SELECT id, display_name FROM users WHERE id = ANY($1::uuid[])', [[...ids]])).rows.map((r) => [r.id, r.display_name]),
+    );
+    const nameOf = (uid: string) => names.get(uid) ?? 'Someone';
+    let previous: string | null = null;
+    const historyViews = history.map((h) => {
+        const changes = h.action === 'CREATED' ? [] : describeChanges(previous, h.snapshot, nameOf);
+        previous = h.snapshot;
+        return {
+            action: h.action,
+            revision: h.revision,
+            actor: h.actor,
+            at: h.occurred_at,
+            summary: summarize(h.action, changes, parseSnapshot(h.snapshot), nameOf, h.actor ?? 'Someone'),
+            changes,
+        };
+    });
     return {
         id: e.id,
         groupId: e.group_id,
@@ -716,6 +828,9 @@ export async function expenseDetail(id: string) {
         category: e.category,
         notes: e.notes,
         splitType: e.split_type,
+        remindAfterDays: e.remind_after_days,
+        payByDate: e.pay_by_date,
+        reminderSentAt: e.reminder_sent_at,
         createdAt: e.created_at,
         updatedAt: e.updated_at,
         deletedAt: e.deleted_at,
@@ -723,8 +838,23 @@ export async function expenseDetail(id: string) {
         shares: shares.map((s) => ({
             userId: s.user_id,
             name: s.display_name,
-            email: s.email,
+            email: s.is_contact ? null : s.email,
+            isContact: s.is_contact,
+            upiId: s.upi_id,
             amount: s.amount,
+            paidAmount: s.user_id === e.paid_by ? s.amount : s.paid_amount,
+            dueDate: s.pay_by_date ?? e.pay_by_date,
+            status: s.user_id === e.paid_by || Number(s.paid_amount) >= Number(s.amount) ? 'PAID' : Number(s.paid_amount) > 0 ? 'PARTIAL' : 'UNPAID',
+            isPayer: s.user_id === e.paid_by,
+        })),
+        claims: claims.map((c) => ({
+            id: c.id,
+            userId: c.user_id,
+            name: c.display_name,
+            amount: c.amount,
+            status: c.status,
+            createdAt: c.created_at,
+            resolvedAt: c.resolved_at,
         })),
         attachments: attachments.map((a) => ({
             id: a.id,
@@ -733,12 +863,7 @@ export async function expenseDetail(id: string) {
             size: num(a.size),
             createdAt: a.created_at,
         })),
-        history: history.map((h) => ({
-            action: h.action,
-            revision: h.revision,
-            actor: h.actor,
-            at: h.occurred_at,
-        })),
+        history: historyViews,
     };
 }
 
@@ -748,4 +873,119 @@ export async function readAttachmentForAdmin(id: string) {
     ).rows[0];
     if (!row) throw notFound('Attachment not found');
     return { name: row.name as string, contentType: row.content_type as string, data: row.data as Buffer };
+}
+
+// ----------------------------------------------------- payment claims, pay links
+
+/** "I've paid" claims across the app, newest first. */
+export async function listClaims(page: PageRequest, status: string | undefined) {
+    const value = status && ['PENDING', 'CONFIRMED', 'REJECTED'].includes(status.toUpperCase()) ? status.toUpperCase() : null;
+    const total = num(
+        (await db.query('SELECT COUNT(*) AS n FROM expense_payment_claims WHERE ($1::text IS NULL OR status = $1)', [value])).rows[0].n,
+    );
+    const rows = (
+        await db.query(
+            `SELECT c.id, c.amount, c.status, c.created_at, c.resolved_at, c.expense_id, c.group_id,
+                    e.description, e.currency, g.name AS group_name,
+                    cu.display_name AS claimant, cu.id AS claimant_id, pu.display_name AS payer, pu.id AS payer_id
+             FROM expense_payment_claims c
+             JOIN expenses e ON e.id = c.expense_id
+             JOIN expense_groups g ON g.id = c.group_id
+             LEFT JOIN users cu ON cu.id = c.user_id
+             LEFT JOIN users pu ON pu.id = e.paid_by
+             WHERE ($1::text IS NULL OR c.status = $1)
+             ORDER BY c.created_at DESC LIMIT $2 OFFSET $3`,
+            [value, page.size, page.offset],
+        )
+    ).rows;
+    return pageResponse(
+        rows.map((r) => ({
+            id: r.id,
+            amount: r.amount,
+            currency: r.currency,
+            status: r.status,
+            createdAt: r.created_at,
+            resolvedAt: r.resolved_at,
+            expenseId: r.expense_id,
+            description: r.description,
+            groupId: r.group_id,
+            groupName: r.group_name,
+            claimant: { id: r.claimant_id, name: r.claimant },
+            payer: { id: r.payer_id, name: r.payer },
+        })),
+        page,
+        total,
+    );
+}
+
+/** Short pay links people have shared. The code itself is never shown, only a short prefix to tell them apart. */
+export async function listPayLinks(page: PageRequest, state: string | undefined) {
+    const condition = state === 'expired' ? 'expires_at <= now()' : state === 'active' ? 'expires_at > now()' : 'TRUE';
+    const total = num((await db.query(`SELECT COUNT(*) AS n FROM pay_links WHERE ${condition}`)).rows[0].n);
+    const rows = (
+        await db.query(
+            `SELECT l.code, l.created_at, l.expires_at, l.payload, u.display_name AS creator, u.id AS creator_id
+             FROM pay_links l LEFT JOIN users u ON u.id = l.created_by
+             WHERE ${condition.replace(/expires_at/g, 'l.expires_at')}
+             ORDER BY l.created_at DESC LIMIT $1 OFFSET $2`,
+            [page.size, page.offset],
+        )
+    ).rows;
+    return pageResponse(
+        rows.map((r) => ({
+            id: r.code,
+            prefix: String(r.code).slice(0, 3) + '…',
+            createdAt: r.created_at,
+            expiresAt: r.expires_at,
+            active: new Date(r.expires_at) > new Date(),
+            creator: { id: r.creator_id, name: r.creator },
+            description: r.payload?.d ?? '',
+            currency: r.payload?.c ?? '',
+            people: Array.isArray(r.payload?.t) ? r.payload.t.length : 0,
+            total: Array.isArray(r.payload?.t)
+                ? r.payload.t.reduce((sum: number, p: { a: string }) => sum + Number(p.a), 0).toFixed(2)
+                : '0.00',
+            acceptsClaims: Boolean(r.payload?.g),
+        })),
+        page,
+        total,
+    );
+}
+
+/** Every invoice issued, searchable by number, name, group or item. */
+export async function listInvoices(page: PageRequest, q: string | undefined) {
+    const needle = like(q);
+    const where = `($1::text IS NULL OR i.number ILIKE $1 OR pe.display_name ILIKE $1 OR pr.display_name ILIKE $1
+                    OR g.name ILIKE $1 OR i.items::text ILIKE $1)`;
+    const from = `FROM invoices i
+        LEFT JOIN users pe ON pe.id = i.payee_id
+        LEFT JOIN users pr ON pr.id = i.payer_id
+        LEFT JOIN expense_groups g ON g.id = i.group_id`;
+    const total = num((await db.query(`SELECT COUNT(*) AS n ${from} WHERE ${where}`, [needle])).rows[0].n);
+    const rows = (
+        await db.query(
+            `SELECT i.number, i.status, i.currency, i.total, i.paid, i.paid_at, i.group_id, jsonb_array_length(i.items) AS items,
+                    pe.id AS payee_id, pe.display_name AS payee, pr.id AS payer_id, pr.display_name AS payer, g.name AS group_name
+             ${from} WHERE ${where}
+             ORDER BY i.paid_at DESC LIMIT $2 OFFSET $3`,
+            [needle, page.size, page.offset],
+        )
+    ).rows;
+    return pageResponse(
+        rows.map((r) => ({
+            number: r.number,
+            status: r.status,
+            currency: r.currency,
+            total: r.total,
+            paid: r.paid,
+            paidAt: r.paid_at,
+            items: num(r.items),
+            groupId: r.group_id,
+            groupName: r.group_name,
+            payee: { id: r.payee_id, name: r.payee },
+            payer: { id: r.payer_id, name: r.payer },
+        })),
+        page,
+        total,
+    );
 }
