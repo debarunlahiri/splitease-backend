@@ -411,7 +411,7 @@ export async function updateDisplayName(conn: Db, userId: string, name: string):
 export async function updateUpiId(conn: Db, userId: string, upiId: string | null): Promise<UserView> {
     // A new UPI ID starts unverified.
     const { rows } = await conn.query(
-        'UPDATE users SET upi_id = $1, upi_verified_at = CASE WHEN upi_id IS NOT DISTINCT FROM $1 THEN upi_verified_at ELSE NULL END WHERE id = $2 RETURNING *',
+        'UPDATE users SET upi_id = $1::varchar, upi_verified_at = CASE WHEN upi_id IS NOT DISTINCT FROM $1::varchar THEN upi_verified_at ELSE NULL END WHERE id = $2 RETURNING *',
         [upiId, userId],
     );
     if (!rows[0]) throw notFound('User not found');
