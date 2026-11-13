@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { Db } from '../database';
 import { config } from '../config';
 import Decimal from 'decimal.js';
-import { badRequest, notFound } from '../utils/errors';
+import { badRequest, HttpError, notFound } from '../utils/errors';
 import { requireMember, requireMembers } from './group.service';
 import { claimFromLink } from './payment-claim.service';
 
@@ -31,18 +31,24 @@ export interface PayLinkPayload {
 
 export async function createPayLink(db: Db, userId: string, payload: PayLinkPayload): Promise<{ code: string; url: string; expiresAt: Date }> {
     // A link that can take "I've paid" must belong to the caller's own group and expense, with real members.
-    // When the caller is not the one who was paid (e.g. a debtor sharing what they owe), still give a short link,
-    // but a plain one: without the group and expense it cannot record payments.
+    // Whenever that does not hold (the caller was not the one paid, someone is not in the group, ...), still give a
+    // short link, but a plain one: without the group and expense it cannot record payments.
     if (payload.g) {
-        await requireMember(db, payload.g, userId);
-        let live = true;
-        if (payload.x) {
-            const expense = (await db.query('SELECT paid_by, group_id FROM expenses WHERE id = $1', [payload.x])).rows[0];
-            live = Boolean(expense && expense.paid_by === userId && expense.group_id === payload.g);
-        }
-        if (live) {
+        let live = false;
+        try {
+            await requireMember(db, payload.g, userId);
+            if (payload.x) {
+                const expense = (await db.query('SELECT paid_by, group_id FROM expenses WHERE id = $1', [payload.x])).rows[0];
+                if (!expense || expense.paid_by !== userId || expense.group_id !== payload.g) {
+                    throw badRequest('That expense is not yours in this group');
+                }
+            }
             await requireMembers(db, payload.g, payload.t.map((p) => p.u).filter((u): u is string => Boolean(u)), 'Everyone on the link must be in the group');
-        } else {
+            live = true;
+        } catch (error) {
+            if (!(error instanceof HttpError)) throw error;
+        }
+        if (!live) {
             const { g, x, ...plain } = payload;
             payload = { ...plain, t: payload.t.map(({ u, ...person }) => person) };
         }

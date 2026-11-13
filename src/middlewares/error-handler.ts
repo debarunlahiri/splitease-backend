@@ -17,6 +17,14 @@ export const errorHandler: ErrorRequestHandler = (error, req, res, next) => {
         return;
     }
     if (error instanceof HttpError) {
+        // The audit log redacts messages, so say why a request was refused (the message is user-facing text).
+        if (error.status === 400 || error.status === 403) {
+            const fields = Object.keys(error.fieldErrors ?? {}).join(',');
+            logger.warn(
+                `Rejected ${req.method} ${req.path} [requestId:${req.requestId ?? 'none'}]: ${error.message}` +
+                    (fields ? ` (fields: ${fields})` : ''),
+            );
+        }
         res.status(error.status).json(
             body(error.status, error.code, error.message, error.fieldErrors),
         );
