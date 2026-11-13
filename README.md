@@ -128,6 +128,19 @@ git pull && npm ci && npm run build && pm2 restart splitease-backend --update-en
 
 Redeploy the website as well (see its README), so the login page and the `/admin` pages exist.
 
+### The app shows a long `/pay#...` link
+
+The app builds that link itself when `POST /api/v1/pay-links` fails. Check the last attempts:
+
+```bash
+pm2 logs splitease-backend --lines 600 --nostream | grep '"path":"/api/v1/pay-links"' | grep -oE '"startedAt":"[^"]*"|"status":[0-9]+' | paste - - | tail -6
+pm2 logs splitease-backend --lines 100 --nostream --err | grep Rejected
+```
+
+`404` means the running build is old (rebuild, then restart). `201` means the server is fine; reopen the share dialog,
+because the app asks for the link only once, when the dialog opens. No new line at all means the app never reached the
+server (a debug build points at your Mac, see the Android README).
+
 ### Troubleshooting sign-in
 
 Test the backend directly on the server (use your real password):
@@ -424,6 +437,13 @@ elsewhere, for example the website's `public/downloads/`.
 - `POST /api/v1/pay-links` `{ v, d, c, n, u?, t:[{n,a}], b? }` stores a split and returns `{ code, url }` where `url` is
   `<site>/p/<code>` (10 random characters, valid 90 days). The details stay on the server instead of in the URL.
 - `GET /api/v1/public/pay/:code` (no sign-in) returns the stored split for the website. Migration `014_pay_links.sql`.
+- The server always answers with a short link. It only adds the group and expense (the "I've paid" features) when the
+  caller is a group member, is the one who was paid, and everyone listed is in the group. Otherwise (for example a
+  debtor sharing what they owe) it stores a **plain** link without them, so the link still shows the split but cannot
+  record payments. This stops the app falling back to the long `/pay#...` URL, which it only does when the server
+  cannot be reached or returns an error.
+- A refused request (`400`/`403`) is logged with its reason as `Rejected <method> <path> ...` in the PM2 error log
+  (`pm2 logs splitease-backend --err`), because the audit log redacts error messages.
 
 ## Payment claims ("I've paid" and confirm)
 
