@@ -53,7 +53,7 @@ Useful commands:
 ```bash
 pm2 status
 pm2 logs splitease-backend
-git pull && npm ci && npm run build && pm2 restart splitease-backend   # deploy
+git pull && npm ci && npm run build && pm2 restart splitease-backend --update-env   # deploy
 ```
 
 On small instances (512 MB / 1 GB) add a swap file, or the process can be
@@ -123,7 +123,7 @@ source, so it succeeding does not mean the running server knows the admin routes
 or copying new code, always rebuild and restart:
 
 ```bash
-npm ci && npm run build && pm2 restart splitease-backend
+git pull && npm ci && npm run build && pm2 restart splitease-backend --update-env
 ```
 
 Redeploy the website as well (see its README), so the login page and the `/admin` pages exist.

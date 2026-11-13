@@ -31,15 +31,21 @@ export interface PayLinkPayload {
 
 export async function createPayLink(db: Db, userId: string, payload: PayLinkPayload): Promise<{ code: string; url: string; expiresAt: Date }> {
     // A link that can take "I've paid" must belong to the caller's own group and expense, with real members.
+    // When the caller is not the one who was paid (e.g. a debtor sharing what they owe), still give a short link,
+    // but a plain one: without the group and expense it cannot record payments.
     if (payload.g) {
         await requireMember(db, payload.g, userId);
+        let live = true;
         if (payload.x) {
             const expense = (await db.query('SELECT paid_by, group_id FROM expenses WHERE id = $1', [payload.x])).rows[0];
-            if (!expense || expense.paid_by !== userId || expense.group_id !== payload.g) {
-                throw badRequest('That expense is not yours in this group');
-            }
+            live = Boolean(expense && expense.paid_by === userId && expense.group_id === payload.g);
         }
-        await requireMembers(db, payload.g, payload.t.map((p) => p.u).filter((u): u is string => Boolean(u)), 'Everyone on the link must be in the group');
+        if (live) {
+            await requireMembers(db, payload.g, payload.t.map((p) => p.u).filter((u): u is string => Boolean(u)), 'Everyone on the link must be in the group');
+        } else {
+            const { g, x, ...plain } = payload;
+            payload = { ...plain, t: payload.t.map(({ u, ...person }) => person) };
+        }
     }
     const now = new Date();
     const expiresAt = new Date(now.getTime() + LIFETIME_MS);
