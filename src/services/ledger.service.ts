@@ -22,6 +22,10 @@ export interface LedgerPerson {
     userId: string;
     displayName: string;
     photoUrl: string | null;
+    /** Added from contacts; has no SplitEase account. */
+    pending: boolean;
+    /** Their phone number with country code, only for the person who added them. */
+    phone: string | null;
     /** Totals per currency, so different currencies are never added together. */
     totals: { currency: string; owed: number }[];
     splits: LedgerSplit[];
@@ -49,7 +53,7 @@ export interface YouOwePerson {
 }
 
 const PENDING_SQL = `
-    SELECT s.user_id, u.display_name, u.photo_url, e.id AS expense_id, e.group_id, e.description,
+    SELECT s.user_id, u.display_name, u.photo_url, u.is_contact, u.contact_phone, u.added_by, e.id AS expense_id, e.group_id, e.description,
            e.expense_date, e.currency, (s.amount - s.paid_amount) AS owed, e.pay_by_date,
            g.name AS group_name, s.amount, s.paid_amount,
            COALESCE(s.pay_by_date, e.pay_by_date) AS due_date
@@ -72,6 +76,8 @@ export async function ledger(db: Db, userId: string): Promise<LedgerView> {
                 userId: row.user_id,
                 displayName: row.display_name,
                 photoUrl: row.photo_url,
+                pending: Boolean(row.is_contact),
+                phone: row.is_contact && row.added_by === userId ? (row.contact_phone ?? null) : null,
                 totals: [],
                 splits: [],
                 claimed: [],

@@ -1,9 +1,10 @@
 import type { Request } from 'express';
 import { db, Db, tx } from '../database';
 import * as groups from '../services/group.service';
+import * as removal from '../services/member-removal.service';
 import { currentUser, pageRequest, uuidParam } from '../utils/http';
 import { parseBody } from '../validators/common';
-import { AddContactMember, CreateGroup, Invite, InviteFriends, JoinLink } from '../validators/group.validator';
+import { AddContactMember, CreateGroup, Invite, InviteFriends, JoinLink, UpdateGroupSettings } from '../validators/group.validator';
 
 // Handlers taking (req, conn) are idempotent writes and already run in a transaction.
 
@@ -82,4 +83,19 @@ export const addContact = (req: Request, conn: Db) =>
         currentUser(req).id,
         uuidParam(req, 'groupId'),
         parseBody(AddContactMember, req.body),
+    );
+
+export const memberUsage = (req: Request) =>
+    removal.memberUsage(db, currentUser(req).id, uuidParam(req, 'groupId'), uuidParam(req, 'memberId'));
+
+export const removeMember = async (req: Request, conn: Db) => {
+    await removal.removeMember(conn, currentUser(req).id, uuidParam(req, 'groupId'), uuidParam(req, 'memberId'), req.query.adjust === 'true');
+};
+
+export const updateSettings = (req: Request, conn: Db) =>
+    groups.updateGroupSettings(
+        conn,
+        currentUser(req).id,
+        uuidParam(req, 'groupId'),
+        parseBody(UpdateGroupSettings, req.body),
     );

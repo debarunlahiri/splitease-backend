@@ -5,6 +5,7 @@ import { appendEvent } from '../events/outbox';
 import { ConnectionAddedEvent, Topics } from '../events/types';
 import { conflict, forbidden, notFound, tooManyRequests } from '../utils/errors';
 import { PageRequest, pageResponse } from '../utils/http';
+import { toJsonNumber } from '../utils/money';
 import { generateToken, sha256Hex } from '../utils/tokens';
 import { friendInvitationEmail, queueMail } from './mail.service';
 
@@ -23,6 +24,13 @@ export async function listFriends(db: Db, userId: string, page: PageRequest) {
         )
     ).rows;
     return pageResponse(rows, page, total);
+}
+
+/** Ends a friendship. Splits you already share are not touched. */
+export async function removeFriend(db: Db, userId: string, friendId: string): Promise<void> {
+    const [first, second] = userId < friendId ? [userId, friendId] : [friendId, userId];
+    const result = await db.query('DELETE FROM friendships WHERE first_user_id = $1 AND second_user_id = $2', [first, second]);
+    if (result.rowCount === 0) throw notFound('This person is not in your friends');
 }
 
 async function checkInviteLimit(db: Db, userId: string, count: number): Promise<void> {
@@ -101,4 +109,95 @@ export async function acceptFriendInvite(db: Db, userId: string, email: string, 
         await appendEvent(db, Topics.connectionAdded, 'ConnectionAddedEvent', userId, userId, event);
     }
     return { friendId: invite.inviter_id };
+}
+
+export interface FriendMoney {
+    currency: string;
+    /** Positive: they owe you. Negative: you owe them. */
+    amount: number;
+}
+
+/** Everything you share with one friend: Splits you are both in, the splits between you, and who owes whom. */
+export async function friendOverview(db: Db, userId: string, friendId: string) {
+    const person = (
+        await db.query(
+            `SELECT id, display_name AS "displayName", photo_url AS "photoUrl" FROM users WHERE id = $1`,
+            [friendId],
+        )
+    ).rows[0];
+    if (!person) throw notFound('Friend not found');
+    const [first, second] = userId < friendId ? [userId, friendId] : [friendId, userId];
+    const isFriend = (
+        await db.query(`SELECT 1 FROM friendships WHERE first_user_id = $1 AND second_user_id = $2`, [first, second])
+    ).rowCount;
+
+    const groups = (
+        await db.query(
+            `SELECT g.id, g.name, g.default_currency AS currency
+             FROM expense_groups g
+             JOIN group_members a ON a.group_id = g.id AND a.user_id = $1
+             JOIN group_members b ON b.group_id = g.id AND b.user_id = $2
+             ORDER BY g.name`,
+            [userId, friendId],
+        )
+    ).rows;
+    if (!isFriend && groups.length === 0) throw notFound('Friend not found');
+
+    const expenses = (
+        await db.query(
+            `SELECT e.id, e.group_id, g.name AS group_name, e.description, e.amount, e.currency, e.expense_date,
+                    e.paid_by, p.display_name AS paid_by_name,
+                    sm.amount AS my_share, sm.paid_amount AS my_paid, sf.amount AS their_share, sf.paid_amount AS their_paid
+             FROM expenses e
+             JOIN expense_groups g ON g.id = e.group_id
+             JOIN users p ON p.id = e.paid_by
+             LEFT JOIN expense_shares sm ON sm.expense_id = e.id AND sm.user_id = $1
+             LEFT JOIN expense_shares sf ON sf.expense_id = e.id AND sf.user_id = $2
+             WHERE e.deleted_at IS NULL AND (
+                   (e.paid_by = $1 AND sf.amount > 0)
+                OR (e.paid_by = $2 AND sm.amount > 0)
+                OR (sm.amount > 0 AND sf.amount > 0))
+             ORDER BY e.expense_date DESC, e.created_at DESC`,
+            [userId, friendId],
+        )
+    ).rows;
+
+    const totals = new Map<string, number>();
+    const perGroup = new Map<string, Map<string, number>>();
+    const list = expenses.map((row) => {
+        // Positive: the friend still owes you for this one. Negative: you still owe the friend.
+        let outstanding = 0;
+        if (row.paid_by === userId) outstanding = toJsonNumber(row.their_share) - toJsonNumber(row.their_paid);
+        else if (row.paid_by === friendId) outstanding = -(toJsonNumber(row.my_share) - toJsonNumber(row.my_paid));
+        if (outstanding !== 0) {
+            totals.set(row.currency, (totals.get(row.currency) ?? 0) + outstanding);
+            const groupTotals = perGroup.get(row.group_id) ?? new Map<string, number>();
+            groupTotals.set(row.currency, (groupTotals.get(row.currency) ?? 0) + outstanding);
+            perGroup.set(row.group_id, groupTotals);
+        }
+        return {
+            id: row.id,
+            groupId: row.group_id,
+            groupName: row.group_name,
+            description: row.description,
+            amount: toJsonNumber(row.amount),
+            currency: row.currency,
+            date: row.expense_date instanceof Date ? row.expense_date.toISOString().slice(0, 10) : String(row.expense_date).slice(0, 10),
+            paidBy: row.paid_by === userId ? 'YOU' : row.paid_by === friendId ? 'FRIEND' : 'OTHER',
+            paidByName: row.paid_by_name,
+            yourShare: toJsonNumber(row.my_share ?? 0),
+            theirShare: toJsonNumber(row.their_share ?? 0),
+            outstanding,
+        };
+    });
+    const money = (map: Map<string, number>): FriendMoney[] =>
+        [...map].map(([currency, amount]) => ({ currency, amount: Math.round(amount * 100) / 100 })).filter((m) => m.amount !== 0);
+
+    return {
+        friend: { ...person, isFriend: Boolean(isFriend) },
+        balance: money(totals),
+        groups: groups.map((g) => ({ id: g.id, name: g.name, currency: g.currency, balance: money(perGroup.get(g.id) ?? new Map()) })),
+        expenses: list.slice(0, 100),
+        expenseCount: list.length,
+    };
 }

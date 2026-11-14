@@ -20,3 +20,5 @@ export const AddContactMember = z
         message: 'needs an email or a phone number',
         path: ['email'],
     });
+
+export const UpdateGroupSettings = z.object({ invoicesEnabled: z.boolean() });

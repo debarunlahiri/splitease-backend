@@ -313,11 +313,17 @@ export async function updateExpense(
     userId: string,
     expenseId: string,
     input: ExpenseInput,
+    /** `skipEditorCheck`: the group's creator is adjusting someone else's split. `quiet`: send no generic update message. */
+    options: { skipEditorCheck?: boolean; quiet?: boolean } = {},
 ): Promise<ExpenseView> {
     const existing = await lockedExpense(db, expenseId);
-    await requireEditor(db, userId, existing);
-    if (userId !== input.paidBy) {
-        throw forbidden('The payer must be the editing user');
+    if (!options.skipEditorCheck) {
+        await requireEditor(db, userId, existing);
+        if (userId !== input.paidBy) {
+            throw forbidden('The payer must be the editing user');
+        }
+    } else if (input.paidBy !== existing.paid_by) {
+        throw forbidden('The payer cannot change here');
     }
     const shares = calculateSplit(input.amount, input.splitType, input.shares);
     await requireMembers(
@@ -376,6 +382,7 @@ export async function updateExpense(
         current: snapshot(expense, shares),
         occurredAt: now.toISOString(),
         actorId: userId,
+        quiet: options.quiet,
     };
     await projectExpense(db, expenseId, expense.group_id, event.revision, event.current);
     await appendEvent(db, Topics.expenseChanged, 'ExpenseChangedEvent', expense.group_id, expenseId, event);

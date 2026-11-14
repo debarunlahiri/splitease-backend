@@ -67,6 +67,12 @@ export async function createPayLink(db: Db, userId: string, payload: PayLinkPayl
     throw new Error('Could not create a pay link');
 }
 
+/** Groups made before the setting existed (or deleted ones) count as enabled. */
+async function invoicesEnabled(db: Db, groupId: string): Promise<boolean> {
+    const row = (await db.query('SELECT invoices_enabled FROM expense_groups WHERE id = $1', [groupId])).rows[0];
+    return row ? row.invoices_enabled !== false : true;
+}
+
 export type PersonState = 'UNPAID' | 'CLAIMED' | 'PAID' | 'NOT_RECEIVED';
 
 /**
@@ -84,6 +90,8 @@ export async function readPayLink(db: Db, code: string) {
     const ids = t.map((p) => p.u).filter((u): u is string => Boolean(u));
     const live = Boolean(g && ids.length > 0);
     const states = new Map<string, { state: PersonState; left: string; paid: string }>();
+    // For a whole-group link: which expenses each person still owes for, so they can see what they are paying.
+    const items = new Map<string, { d: string; a: string; t: string }[]>();
     if (live) {
         const scope = [g, row.created_by, ids, x ?? null];
         const sums = (
@@ -118,6 +126,28 @@ export async function readPayLink(db: Db, code: string) {
                 )
             ).rows.map((r: any) => r.user_id),
         );
+        if (!x) {
+            const owed = (
+                await db.query(
+                    `SELECT s.user_id, e.description, e.expense_date, s.amount, s.paid_amount
+                     FROM expense_shares s JOIN expenses e ON e.id = s.expense_id
+                     WHERE e.group_id = $1 AND e.paid_by = $2 AND e.deleted_at IS NULL AND s.user_id = ANY($3::uuid[])
+                       AND s.amount > s.paid_amount
+                     ORDER BY e.expense_date ASC, e.created_at ASC`,
+                    [g, row.created_by, ids],
+                )
+            ).rows;
+            for (const r of owed) {
+                const list = items.get(r.user_id) ?? [];
+                if (list.length >= 50) continue;
+                list.push({
+                    d: String(r.description).slice(0, 160),
+                    a: new Decimal(r.amount).minus(r.paid_amount).toFixed(2),
+                    t: String(r.expense_date instanceof Date ? r.expense_date.toISOString() : r.expense_date).slice(0, 10),
+                });
+                items.set(r.user_id, list);
+            }
+        }
         for (const sum of sums) {
             const left = new Decimal(sum.total).minus(sum.paid);
             const state: PersonState = left.lte(0)
@@ -133,9 +163,13 @@ export async function readPayLink(db: Db, code: string) {
     return {
         ...rest,
         claims: live,
+        invoices: g ? await invoicesEnabled(db, g) : true,
         t: t.map(({ u, ...person }) => {
             const info = u ? states.get(u) : undefined;
-            return info ? { ...person, s: info.state, l: info.left, p: info.paid } : person;
+            const owed = u ? items.get(u) : undefined;
+            return info
+                ? { ...person, s: info.state, l: info.left, p: info.paid, ...(owed?.length ? { i: owed } : {}) }
+                : person;
         }),
     };
 }
@@ -182,6 +216,7 @@ export async function invoiceFromPayLink(db: Db, code: string, index: number): P
     const payload: PayLinkPayload = link.payload;
     const person = payload.t[index];
     if (!payload.g || !person?.u) throw badRequest('This link has no invoices');
+    if (!(await invoicesEnabled(db, payload.g))) throw notFound('Invoices are turned off for this group');
     const rows = (
         await db.query(
             `SELECT e.description, e.expense_date, e.currency, s.amount, s.paid_amount

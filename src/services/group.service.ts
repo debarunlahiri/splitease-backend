@@ -14,6 +14,7 @@ interface GroupRow {
     default_currency: string;
     created_by: string;
     created_at: Date;
+    invoices_enabled?: boolean;
 }
 
 export interface MemberView {
@@ -26,10 +27,14 @@ export interface MemberView {
     pending?: boolean;
     upiId?: string | null;
     upiVerified?: boolean;
+    /** The phone number of a contact you added yourself; never shown to other members. */
+    contactPhone?: string | null;
 }
 
 export interface GroupView {
     id: string;
+    /** Whether invoices and receipts can be issued for this group's pay links. */
+    invoicesEnabled: boolean;
     name: string;
     defaultCurrency: string;
     createdBy: string;
@@ -53,7 +58,7 @@ type ListedInvitationView = InvitationView & { groupName: string };
 
 // ------------------------------------------------- membership (used by other modules)
 
-async function requiredGroup(db: Db, groupId: string): Promise<GroupRow> {
+export async function requiredGroup(db: Db, groupId: string): Promise<GroupRow> {
     const group = (await db.query('SELECT * FROM expense_groups WHERE id = $1', [groupId])).rows[0];
     if (!group) throw notFound('Group not found');
     return group;
@@ -216,11 +221,12 @@ async function addInvitedMember(
 
 // ------------------------------------------------------------------ groups
 
-async function groupViews(db: Db, groups: GroupRow[]): Promise<GroupView[]> {
+async function groupViews(db: Db, groups: GroupRow[], viewerId?: string): Promise<GroupView[]> {
     if (groups.length === 0) return [];
     const members = (
         await db.query(
-            `SELECT m.group_id, m.user_id, m.role, m.joined_at, u.display_name, u.photo_url, u.is_contact, u.upi_id, u.upi_verified_at
+            `SELECT m.group_id, m.user_id, m.role, m.joined_at, u.display_name, u.photo_url, u.is_contact, u.upi_id, u.upi_verified_at,
+                    u.contact_phone, u.added_by
              FROM group_members m LEFT JOIN users u ON u.id = m.user_id
              WHERE m.group_id = ANY($1::uuid[])
              ORDER BY m.joined_at ASC, m.id ASC`,
@@ -233,6 +239,7 @@ async function groupViews(db: Db, groups: GroupRow[]): Promise<GroupView[]> {
         defaultCurrency: group.default_currency,
         createdBy: group.created_by,
         createdAt: group.created_at,
+        invoicesEnabled: group.invoices_enabled !== false,
         members: members
             .filter((member) => member.group_id === group.id)
             .map((member) => ({
@@ -246,6 +253,7 @@ async function groupViews(db: Db, groups: GroupRow[]): Promise<GroupView[]> {
                 /** UPI ID for paying this person back (INR). */
                 upiId: member.upi_id ?? null,
                 upiVerified: Boolean(member.upi_id && member.upi_verified_at),
+                contactPhone: member.is_contact && viewerId && member.added_by === viewerId ? (member.contact_phone ?? null) : null,
             })),
     }));
 }
@@ -263,7 +271,7 @@ export async function createGroup(
         )
     ).rows[0];
     await addMember(db, group.id, userId, 'OWNER');
-    return (await groupViews(db, [group]))[0];
+    return (await groupViews(db, [group], userId))[0];
 }
 
 export async function listGroups(
@@ -282,11 +290,11 @@ export async function listGroups(
             [userId, page.size, page.offset],
         )
     ).rows;
-    return pageResponse(await groupViews(db, groups), page, total);
+    return pageResponse(await groupViews(db, groups, userId), page, total);
 }
 
 export async function groupDetail(db: Db, userId: string, groupId: string): Promise<GroupView> {
-    const view = (await groupViews(db, [await requiredGroup(db, groupId)]))[0];
+    const view = (await groupViews(db, [await requiredGroup(db, groupId)], userId))[0];
     if (!view.members.some((member) => member.userId === userId)) {
         throw forbidden('Group membership required');
     }
@@ -671,4 +679,17 @@ export async function joinByInviteLink(
     const group = await requiredGroup(db, link.group_id);
     await addInvitedMember(db, group, userId, group.created_by);
     return { groupId: group.id };
+}
+
+/** The group's creator turns invoices and receipts on or off for the group. */
+export async function updateGroupSettings(
+    db: Db,
+    userId: string,
+    groupId: string,
+    input: { invoicesEnabled: boolean },
+): Promise<GroupView> {
+    const group = await requiredGroup(db, groupId);
+    if (group.created_by !== userId) throw forbidden('Only the person who created this group can change its settings');
+    await db.query('UPDATE expense_groups SET invoices_enabled = $1 WHERE id = $2', [input.invoicesEnabled, groupId]);
+    return groupDetail(db, userId, groupId);
 }

@@ -53,13 +53,73 @@ export async function sendDueReminders(conn: Db = db): Promise<number> {
     return due.length;
 }
 
+type ShareReminderKind = 'DUE_SOON' | 'DUE_TODAY' | 'LATE_3' | 'LATE_7';
+
+/** Which reminder is due for a pay-by date: the day before, the day itself, then 3 and 7 days late. */
+export function reminderKind(daysUntilDue: number): ShareReminderKind | null {
+    if (daysUntilDue === 1) return 'DUE_SOON';
+    if (daysUntilDue === 0) return 'DUE_TODAY';
+    if (daysUntilDue <= -7) return 'LATE_7';
+    if (daysUntilDue <= -3) return 'LATE_3';
+    return null;
+}
+
+const REMINDER_TEXT: Record<ShareReminderKind, (payer: string, what: string, left: string) => [string, string]> = {
+    DUE_SOON: (payer, what, left) => ['Due tomorrow', `${left} for "${what}" is due tomorrow. Pay ${payer} when you can.`],
+    DUE_TODAY: (payer, what, left) => ['Due today', `${left} for "${what}" is due today. Pay ${payer} and mark it as paid.`],
+    LATE_3: (payer, what, left) => ['A little late', `${left} for "${what}" was due a few days ago. A quick payment to ${payer} will sort it.`],
+    LATE_7: (payer, what, left) => ['Still waiting', `${payer} is still waiting for ${left} for "${what}". Please pay when you can.`],
+};
+
+/**
+ * A gentle nudge to the person who owes, in the app (push and inbox, so it costs nothing): the day before the pay-by
+ * date, on it, and again 3 and 7 days late. Each reminder is sent once. People added from contacts have no app, so
+ * the payer reminds them by message from the Ledger screen instead.
+ */
+export async function sendShareReminders(conn: Db = db): Promise<number> {
+    const rows = (
+        await conn.query(
+            `SELECT s.expense_id, s.user_id, e.description, e.currency, e.group_id,
+                    (s.amount - s.paid_amount) AS owed,
+                    (COALESCE(s.pay_by_date, e.pay_by_date) - CURRENT_DATE) AS days,
+                    p.display_name AS payer_name
+             FROM expense_shares s
+             JOIN expenses e ON e.id = s.expense_id
+             JOIN users p ON p.id = e.paid_by
+             JOIN users u ON u.id = s.user_id
+             WHERE e.deleted_at IS NULL AND s.user_id <> e.paid_by AND s.amount > s.paid_amount
+               AND NOT u.is_contact AND u.disabled_at IS NULL
+               AND COALESCE(s.pay_by_date, e.pay_by_date) IS NOT NULL
+               AND COALESCE(s.pay_by_date, e.pay_by_date) <= CURRENT_DATE + 1
+             ORDER BY COALESCE(s.pay_by_date, e.pay_by_date)
+             LIMIT 500`,
+        )
+    ).rows;
+    let sent = 0;
+    for (const row of rows) {
+        const kind = reminderKind(Number(row.days));
+        if (!kind) continue;
+        await tx(async (work) => {
+            const claimed = await work.query(
+                `INSERT INTO share_reminders (expense_id, user_id, kind) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+                [row.expense_id, row.user_id, kind],
+            );
+            if (claimed.rowCount === 0) return;
+            const [title, message] = REMINDER_TEXT[kind](row.payer_name, row.description, `${row.currency} ${Number(row.owed).toFixed(2)}`);
+            await notifyExpenseReminder(work, row.user_id, title, message, row.group_id, row.expense_id);
+            sent++;
+        });
+    }
+    return sent;
+}
+
 let timer: NodeJS.Timeout | undefined;
 let stopped = true;
 
 export function startReminderDispatcher(): void {
     stopped = false;
     const tick = () => {
-        sendDueReminders()
+        Promise.all([sendDueReminders(), sendShareReminders()])
             .catch((error) => logger.error('Expense reminders failed', error))
             .finally(() => {
                 if (!stopped) timer = setTimeout(tick, SWEEP_EVERY_MS);

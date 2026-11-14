@@ -45,6 +45,8 @@ export interface ExpenseChangedEvent {
     /** null when the expense was deleted. */
     current: ExpenseSnapshot | null;
     occurredAt: string;
+    /** Another message explains this change (for example a person was removed), so skip the generic one. */
+    quiet?: boolean;
 }
 
 export interface SettlementRecordedEvent {

@@ -1,0 +1,48 @@
+-- Hindi wording for phone number verification by SMS code.
+INSERT INTO app_strings (key) VALUES
+    ('Send code'),
+    ('Sending…'),
+    ('Verify'),
+    ('Checking…'),
+    ('Resend code'),
+    ('Resend code in {0}s'),
+    ('Change number'),
+    ('We''ll text you a 6-digit code to make sure the number is yours.'),
+    ('We sent a code to {0}'),
+    ('6-digit code'),
+    ('Verified'),
+    ('Phone number verified.'),
+    ('That phone number isn''t right.'),
+    ('That code isn''t right. Try again.'),
+    ('Too many tries. Please wait a while and try again.'),
+    ('This number is already used on another account.'),
+    ('Couldn''t verify the number. Check it and try again.'),
+    ('Ask for a new code first.'),
+    ('Please sign in again, then try once more.'),
+    ('Couldn''t finish. Please try again.'),
+    ('Phone verification isn''t set up yet.')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO app_string_translations (key, lang, value) VALUES
+    ('Send code', 'hi', 'कोड भेजें'),
+    ('Sending…', 'hi', 'भेज रहे हैं…'),
+    ('Verify', 'hi', 'जाँचें'),
+    ('Checking…', 'hi', 'जाँच हो रही है…'),
+    ('Resend code', 'hi', 'कोड दोबारा भेजें'),
+    ('Resend code in {0}s', 'hi', '{0} सेकंड में कोड दोबारा भेजें'),
+    ('Change number', 'hi', 'नंबर बदलें'),
+    ('We''ll text you a 6-digit code to make sure the number is yours.', 'hi', 'यह पक्का करने के लिए हम आपको 6 अंकों का कोड SMS करेंगे कि नंबर आपका है।'),
+    ('We sent a code to {0}', 'hi', 'हमने {0} पर कोड भेजा है'),
+    ('6-digit code', 'hi', '6 अंकों का कोड'),
+    ('Verified', 'hi', 'पुष्टि हो गई'),
+    ('Phone number verified.', 'hi', 'फ़ोन नंबर की पुष्टि हो गई।'),
+    ('That phone number isn''t right.', 'hi', 'यह फ़ोन नंबर सही नहीं है।'),
+    ('That code isn''t right. Try again.', 'hi', 'यह कोड सही नहीं है। फिर कोशिश करें।'),
+    ('Too many tries. Please wait a while and try again.', 'hi', 'बहुत ज़्यादा कोशिशें हो गईं। कृपया कुछ देर रुककर फिर कोशिश करें।'),
+    ('This number is already used on another account.', 'hi', 'यह नंबर किसी और खाते में इस्तेमाल हो रहा है।'),
+    ('Couldn''t verify the number. Check it and try again.', 'hi', 'नंबर की पुष्टि नहीं हो सकी। उसे जाँचकर फिर कोशिश करें।'),
+    ('Ask for a new code first.', 'hi', 'पहले नया कोड माँगें।'),
+    ('Please sign in again, then try once more.', 'hi', 'कृपया फिर साइन इन करें, फिर एक बार कोशिश करें।'),
+    ('Couldn''t finish. Please try again.', 'hi', 'पूरा नहीं हो सका। कृपया फिर कोशिश करें।'),
+    ('Phone verification isn''t set up yet.', 'hi', 'फ़ोन की पुष्टि अभी चालू नहीं है।')
+ON CONFLICT (key, lang) DO NOTHING;

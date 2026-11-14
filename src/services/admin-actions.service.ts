@@ -1,3 +1,4 @@
+import { setBool } from './settings.service';
 import { randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { Db, db, PG_UNIQUE_VIOLATION, pgErrorCode, tx } from '../database';
@@ -100,6 +101,18 @@ export async function setUserSuspended(
         }
         await audit(actor, suspended ? 'user.suspend' : 'user.restore', 'user', id, { reason }, conn);
     });
+}
+
+/** Whether this person must confirm their phone number with a code: follow the global switch, or force it either way. */
+export async function setUserPhoneVerification(actor: Actor, id: string, mode: 'DEFAULT' | 'REQUIRED' | 'NOT_REQUIRED'): Promise<void> {
+    const result = await db.query('UPDATE users SET phone_verification = $2 WHERE id = $1', [id, mode === 'DEFAULT' ? null : mode]);
+    if (result.rowCount === 0) throw notFound('User not found');
+    await audit(actor, 'user.phone-verification', 'user', id, { mode });
+}
+
+export async function setPhoneVerificationForAll(actor: Actor, required: boolean): Promise<void> {
+    await setBool(db, 'phone_verification_required', required);
+    await audit(actor, 'settings.phone-verification', 'settings', null, { required });
 }
 
 export async function renameUser(actor: Actor, id: string, displayName: string): Promise<void> {

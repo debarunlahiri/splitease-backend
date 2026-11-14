@@ -1,3 +1,4 @@
+import { phoneVerificationRequired } from './settings.service';
 import { checkUpiId } from '../utils/upi';
 import { randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
@@ -33,6 +34,9 @@ interface UserRow {
     photo_url: string | null;
     upi_id?: string | null;
     upi_verified_at?: Date | null;
+    phone?: string | null;
+    phone_verified_at?: Date | null;
+    country?: string | null;
     disabled_at: Date | null;
 }
 
@@ -47,6 +51,12 @@ export interface UserView {
     upiVerified: boolean;
     /** The part after @ is not a handle we know; worth double-checking. */
     upiHandleKnown: boolean;
+    /** The account holder's own phone number with country code (E.164). */
+    phone: string | null;
+    /** The number was confirmed with a one-time code sent by SMS. */
+    phoneVerified: boolean;
+    /** The country they chose (two letters), used for their default phone code and currency. */
+    country: string | null;
 }
 
 export interface AuthResponse {
@@ -72,6 +82,9 @@ function userView(user: UserRow): UserView {
         upiId: user.upi_id ?? null,
         upiVerified: Boolean(user.upi_id && user.upi_verified_at),
         upiHandleKnown: user.upi_id ? checkUpiId(user.upi_id).unknownHandle !== true : true,
+        phone: user.phone ?? null,
+        phoneVerified: Boolean(user.phone && user.phone_verified_at),
+        country: user.country ?? null,
     };
 }
 
@@ -404,6 +417,65 @@ export async function updateDisplayName(conn: Db, userId: string, name: string):
         'UPDATE users SET display_name = $1 WHERE id = $2 RETURNING *',
         [name, userId],
     );
+    if (!rows[0]) throw notFound('User not found');
+    return userView(rows[0]);
+}
+
+/**
+ * Saves or removes the number. When this person has to confirm it with a code (the admin's switch, or their own
+ * setting), adding one goes through [verifyPhone] instead; otherwise a valid number with its country code is enough.
+ */
+export async function updatePhone(conn: Db, userId: string, phone: string | null): Promise<UserView> {
+    if (phone !== null) {
+        if (await phoneVerificationRequired(conn, userId)) {
+            throw badRequest('Confirm your number with the code we send you');
+        }
+        const { rows } = await conn.query(
+            'UPDATE users SET phone = $1, phone_verified_at = NULL WHERE id = $2 RETURNING *',
+            [phone, userId],
+        );
+        if (!rows[0]) throw notFound('User not found');
+        return userView(rows[0]);
+    }
+    const { rows } = await conn.query(
+        'UPDATE users SET phone = NULL, phone_verified_at = NULL WHERE id = $1 RETURNING *',
+        [userId],
+    );
+    if (!rows[0]) throw notFound('User not found');
+    return userView(rows[0]);
+}
+
+/**
+ * The app signed the phone number in with Firebase (an SMS code), so the Firebase ID token carries it. Saving the
+ * number from the token, not from the request, is what proves the person has the phone.
+ */
+export async function verifyPhone(conn: Db, userId: string, idToken: string): Promise<UserView> {
+    const auth = firebaseAuth();
+    let token;
+    try {
+        token = await auth.verifyIdToken(idToken, true);
+    } catch (error) {
+        const code = (error as { code?: unknown } | null)?.code;
+        if (typeof code === 'string' && code.startsWith('auth/') && code !== 'auth/internal-error') {
+            throw badCredentials('Invalid Firebase credential');
+        }
+        logger.error('Firebase ID token verification is unavailable', error);
+        throw unavailable(SIGN_IN_UNAVAILABLE);
+    }
+    const user = (await conn.query('SELECT * FROM users WHERE id = $1', [userId])).rows[0] as UserRow | undefined;
+    if (!user) throw notFound('User not found');
+    if (!user.firebase_uid || user.firebase_uid !== token.uid) throw badCredentials('This sign-in is for another account');
+    const phone = typeof token.phone_number === 'string' ? token.phone_number : '';
+    if (!/^\+[1-9]\d{6,14}$/.test(phone)) throw badRequest('This sign-in has no verified phone number');
+    const { rows } = await conn.query(
+        'UPDATE users SET phone = $1, phone_verified_at = now() WHERE id = $2 RETURNING *',
+        [phone, userId],
+    );
+    return userView(rows[0]);
+}
+
+export async function updateCountry(conn: Db, userId: string, country: string | null): Promise<UserView> {
+    const { rows } = await conn.query('UPDATE users SET country = $1 WHERE id = $2 RETURNING *', [country, userId]);
     if (!rows[0]) throw notFound('User not found');
     return userView(rows[0]);
 }

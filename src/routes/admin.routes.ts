@@ -4,6 +4,9 @@ import { z } from 'zod';
 import * as actions from '../services/admin-actions.service';
 import * as admin from '../services/admin.service';
 import * as campaign from '../services/campaign.service';
+import * as translations from '../services/translation.service';
+import { phoneVerificationRequiredForAll } from '../services/settings.service';
+import { db } from '../database';
 import { badRequest } from '../utils/errors';
 import { asyncHandler, pageRequest, route, uuidParam } from '../utils/http';
 import { email, notBlank, parseBody, uuid } from '../validators/common';
@@ -61,6 +64,24 @@ adminRouter.get(
     ),
 );
 adminRouter.get('/users/:id', route(200, async (req) => admin.userDetail(uuidParam(req, 'id'))));
+adminRouter.get(
+    '/settings',
+    route(200, async () => ({ phoneVerificationRequired: await phoneVerificationRequiredForAll(db) })),
+);
+adminRouter.patch(
+    '/settings',
+    route(204, async (req) => {
+        const body = parseBody(z.object({ phoneVerificationRequired: z.boolean() }), req.body);
+        await actions.setPhoneVerificationForAll(actor(req), body.phoneVerificationRequired);
+    }),
+);
+adminRouter.patch(
+    '/users/:id/phone-verification',
+    route(204, async (req) => {
+        const body = parseBody(z.object({ mode: z.enum(['DEFAULT', 'REQUIRED', 'NOT_REQUIRED']) }), req.body);
+        await actions.setUserPhoneVerification(actor(req), uuidParam(req, 'id'), body.mode);
+    }),
+);
 adminRouter.post(
     '/users/:id/revoke-sessions',
     route(200, async (req) => admin.revokeUserSessions(uuidParam(req, 'id'))),
@@ -424,5 +445,36 @@ adminRouter.post(
             req.body,
         );
         return campaign.send(actor(req), body);
+    }),
+);
+
+// ----------------------------------------------------------- translations
+adminRouter.get('/languages', route(200, () => translations.listLanguages(db, true)));
+adminRouter.patch(
+    '/languages/:code',
+    route(200, async (req) => {
+        const { enabled } = parseBody(z.object({ enabled: z.boolean() }), req.body);
+        await translations.setLanguageEnabled(db, String(req.params.code), enabled);
+        return { ok: true };
+    }),
+);
+adminRouter.get(
+    '/strings',
+    route(200, (req) =>
+        translations.adminStrings(db, queryText(req, 'lang') ?? 'hi', queryText(req, 'q'), queryText(req, 'missing') === 'true'),
+    ),
+);
+adminRouter.post(
+    '/strings',
+    route(200, async (req) => {
+        const body = parseBody(z.object({ lang: text(10), key: text(500), value: z.string().max(1000) }), req.body);
+        return translations.saveTranslation(db, body.lang, body.key, body.value);
+    }),
+);
+adminRouter.post(
+    '/strings/delete',
+    route(200, async (req) => {
+        await translations.deleteString(db, parseBody(z.object({ key: text(500) }), req.body).key);
+        return { ok: true };
     }),
 );

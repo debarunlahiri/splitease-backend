@@ -201,6 +201,11 @@ async function writeNotification(
     }
 }
 
+/** A message about who is in a group (someone was removed, and what that changed for you). */
+export function notifyMembershipChange(db: Db, userId: string, title: string, message: string, groupId: string): Promise<void> {
+    return writeNotification(db, userId, 'GROUP_MEMBER_REMOVED', title, message, { groupId });
+}
+
 /** A reminder for the payer: someone still owes them for this expense. */
 export function notifyExpenseReminder(
     db: Db,
@@ -313,6 +318,7 @@ async function expenseCreated(db: Db, event: ExpenseCreatedEvent): Promise<void>
 }
 
 async function expenseChanged(db: Db, event: ExpenseChangedEvent): Promise<void> {
+    if (event.quiet) return;
     const removed = event.current === null;
     const title = await titleFor(db, event.groupId, removed ? 'Expense removed' : 'Expense updated');
     for (const userId of recipients(event.actorId, event.previous, event.current)) {

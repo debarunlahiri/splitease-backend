@@ -1,3 +1,5 @@
+import { db } from '../database';
+import { phoneVerificationRequired } from '../services/settings.service';
 import type { Request } from 'express';
 import type { Db } from '../database';
 import * as auth from '../services/auth.service';
@@ -10,6 +12,9 @@ import {
     ResendVerification,
     UpdateDisplayName,
     UpdateUpiId,
+    UpdateCountry,
+    UpdatePhone,
+    VerifyPhone,
     VerifyEmail,
 } from '../validators/auth.validator';
 import { parseBody } from '../validators/common';
@@ -32,5 +37,18 @@ export const updateDisplayName = (req: Request, conn: Db) =>
 
 export const updateUpiId = (req: Request, conn: Db) =>
     auth.updateUpiId(conn, currentUser(req).id, parseBody(UpdateUpiId, req.body).upiId);
+
+export const updatePhone = (req: Request, conn: Db) =>
+    auth.updatePhone(conn, currentUser(req).id, parseBody(UpdatePhone, req.body).phone);
+
+export const updateCountry = (req: Request, conn: Db) =>
+    auth.updateCountry(conn, currentUser(req).id, parseBody(UpdateCountry, req.body).country);
+
+export const verifyPhone = (req: Request, conn: Db) =>
+    auth.verifyPhone(conn, currentUser(req).id, parseBody(VerifyPhone, req.body).idToken);
+
+export const phonePolicy = async (req: Request) => ({
+    required: await phoneVerificationRequired(db, currentUser(req).id),
+});
 
 export const confirmUpiId = (req: Request, conn: Db) => auth.confirmUpiId(conn, currentUser(req).id);

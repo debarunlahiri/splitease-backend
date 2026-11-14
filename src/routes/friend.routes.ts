@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { db } from '../database';
 import { idempotent } from '../middlewares/idempotency';
 import * as friends from '../services/friend.service';
-import { currentUser, pageRequest, route } from '../utils/http';
+import { currentUser, pageRequest, route, uuidParam } from '../utils/http';
 import { email, parseBody } from '../validators/common';
 import { JoinLink } from '../validators/group.validator';
 
@@ -14,6 +14,14 @@ export const friendsRouter = Router();
 friendsRouter.get(
     '/',
     route(200, (req) => friends.listFriends(db, currentUser(req).id, pageRequest(req))),
+);
+friendsRouter.get(
+    '/:friendId/overview',
+    route(200, (req) => friends.friendOverview(db, currentUser(req).id, uuidParam(req, 'friendId'))),
+);
+friendsRouter.delete(
+    '/:friendId',
+    idempotent(204, (req, conn) => friends.removeFriend(conn, currentUser(req).id, uuidParam(req, 'friendId'))),
 );
 friendsRouter.post('/invitations', idempotent(201, (req, conn) => {
     const user = currentUser(req);

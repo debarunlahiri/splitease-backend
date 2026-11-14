@@ -19,6 +19,9 @@ groupsRouter.post('/invitations/:invitationId/resend', idempotent(200, groups.re
 groupsRouter.post('/invite-links/join', route(200, groups.joinInviteLink));
 
 groupsRouter.get('/:groupId', route(200, groups.detail));
+groupsRouter.get('/:groupId/members/:memberId/usage', route(200, groups.memberUsage));
+groupsRouter.delete('/:groupId/members/:memberId', idempotent(204, groups.removeMember));
+groupsRouter.patch('/:groupId/settings', idempotent(200, groups.updateSettings));
 groupsRouter.post('/:groupId/invitations', idempotent(201, groups.invite));
 groupsRouter.post('/:groupId/invitations/friends', idempotent(201, groups.inviteFriends));
 groupsRouter.post('/:groupId/contacts', idempotent(201, groups.addContact));

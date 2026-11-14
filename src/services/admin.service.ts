@@ -333,6 +333,9 @@ export async function userDetail(id: string) {
         google: user.firebase_uid !== null,
         upiId: user.upi_id,
         upiVerifiedAt: user.upi_id ? user.upi_verified_at : null,
+        phone: user.phone ?? null,
+        phoneVerifiedAt: user.phone ? user.phone_verified_at : null,
+        phoneVerification: user.phone_verification ?? 'DEFAULT',
         isContact: user.is_contact,
         contact: user.is_contact
             ? { email: user.contact_email, phone: user.contact_phone, addedBy: user.added_by }
