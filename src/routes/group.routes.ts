@@ -19,6 +19,7 @@ groupsRouter.post('/invitations/:invitationId/resend', idempotent(200, groups.re
 groupsRouter.post('/invite-links/join', route(200, groups.joinInviteLink));
 
 groupsRouter.get('/:groupId', route(200, groups.detail));
+groupsRouter.delete('/:groupId', idempotent(204, groups.remove));
 groupsRouter.get('/:groupId/members/:memberId/usage', route(200, groups.memberUsage));
 groupsRouter.delete('/:groupId/members/:memberId', idempotent(204, groups.removeMember));
 groupsRouter.patch('/:groupId/settings', idempotent(200, groups.updateSettings));

@@ -99,3 +99,6 @@ export const updateSettings = (req: Request, conn: Db) =>
         uuidParam(req, 'groupId'),
         parseBody(UpdateGroupSettings, req.body),
     );
+
+export const remove = (req: Request, conn: Db) =>
+    groups.deleteGroup(conn, currentUser(req).id, uuidParam(req, 'groupId'));

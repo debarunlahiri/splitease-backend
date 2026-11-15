@@ -693,3 +693,23 @@ export async function updateGroupSettings(
     await db.query('UPDATE expense_groups SET invoices_enabled = $1 WHERE id = $2', [input.invoicesEnabled, groupId]);
     return groupDetail(db, userId, groupId);
 }
+
+/** Owner-only hard delete: the group with its splits, payments, balances and invitations. */
+export async function deleteGroup(db: Db, ownerId: string, groupId: string): Promise<void> {
+    await lockGroup(db, groupId);
+    const group = await requiredGroup(db, groupId);
+    if (group.created_by !== ownerId) throw forbidden('Only the group owner can delete this group');
+    const byGroup = ['expense_audit', 'expense_projections', 'settlements', 'group_balances', 'recurring_expenses', 'expense_templates', 'invoices', 'group_invitations', 'pending_invitation_alerts'];
+    await db.query(
+        'DELETE FROM expense_payment_claims WHERE expense_id IN (SELECT id FROM expenses WHERE group_id = $1)',
+        [groupId],
+    );
+    for (const table of byGroup) await db.query(`DELETE FROM ${table} WHERE group_id = $1`, [groupId]);
+    await db.query('DELETE FROM notifications WHERE group_id = $1', [groupId]);
+    await db.query('DELETE FROM expenses WHERE group_id = $1', [groupId]);
+    await db.query('DELETE FROM expense_groups WHERE id = $1', [groupId]);
+    // Contacts that only existed for this group.
+    await db.query(
+        'DELETE FROM users WHERE is_contact AND NOT EXISTS (SELECT 1 FROM group_members m WHERE m.user_id = users.id)',
+    );
+}

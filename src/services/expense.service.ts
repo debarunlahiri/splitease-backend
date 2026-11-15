@@ -407,7 +407,12 @@ export async function deleteExpense(
     options: { skipEditorCheck?: boolean } = {},
 ): Promise<void> {
     const existing = await lockedExpense(db, expenseId);
-    if (!options.skipEditorCheck) await requireEditor(db, userId, existing);
+    if (!options.skipEditorCheck) {
+        // The group owner may also delete any split in their group.
+        const owner = (await db.query('SELECT created_by FROM expense_groups WHERE id = $1', [existing.group_id])).rows[0]?.created_by;
+        if (owner === userId) await requireMember(db, existing.group_id, userId);
+        else await requireEditor(db, userId, existing);
+    }
     const shares = asShares(await storedShares(db, [expenseId]));
     const now = new Date();
     const expense = (
